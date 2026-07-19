@@ -1,0 +1,156 @@
+{
+  "common": {
+    "appName": "НашКорт",
+    "loading": "Загрузка...",
+    "save": "Сохранить",
+    "cancel": "Отмена",
+    "delete": "Удалить",
+    "confirm": "Подтвердить",
+    "back": "Назад",
+    "search": "Поиск...",
+    "actions": "Действия",
+    "status": "Статус",
+    "noResults": "Ничего не найдено",
+    "error": "Произошла ошибка",
+    "success": "Успешно"
+  },
+  "nav": {
+    "courts": "Корты",
+    "myBookings": "Мои бронирования",
+    "profile": "Профиль",
+    "admin": "Панель управления",
+    "login": "Войти",
+    "register": "Регистрация",
+    "logout": "Выйти"
+  },
+  "home": {
+    "title": "Забронируйте теннисный корт",
+    "subtitle": "Находите и бронируйте теннисные корты быстро и удобно",
+    "viewCourts": "Смотреть корты",
+    "features": {
+      "easy": "Простое бронирование",
+      "easyDesc": "Забронируйте корт в несколько кликов",
+      "multiple": "Множество кортов",
+      "multipleDesc": "Выбирайте из различных кортов и покрытий",
+      "manage": "Управление бронированиями",
+      "manageDesc": "Просматривайте, управляйте и отменяйте бронирования в любое время"
+    }
+  },
+  "auth": {
+    "loginTitle": "Вход",
+    "registerTitle": "Создать аккаунт",
+    "email": "Электронная почта",
+    "password": "Пароль",
+    "confirmPassword": "Подтвердите пароль",
+    "name": "Полное имя",
+    "phone": "Номер телефона",
+    "noAccount": "Нет аккаунта?",
+    "hasAccount": "Уже есть аккаунт?",
+    "loginButton": "Войти",
+    "registerButton": "Зарегистрироваться",
+    "errors": {
+      "invalidCredentials": "Неверный email или пароль",
+      "emailExists": "Этот email уже зарегистрирован",
+      "passwordMismatch": "Пароли не совпадают",
+      "required": "Это поле обязательно",
+      "invalidEmail": "Введите корректный email"
+    }
+  },
+  "courts": {
+    "title": "Теннисные корты",
+    "surface": {
+      "HARD": "Хард",
+      "CLAY": "Грунт",
+      "GRASS": "Трава",
+      "CARPET": "Ковёр",
+      "ARTIFICIAL": "Искусственное"
+    },
+    "indoor": "Крытый",
+    "outdoor": "Открытый",
+    "bookNow": "Забронировать",
+    "perSlot": "за слот",
+    "details": "Информация о корте",
+    "operatingHours": "Часы работы",
+    "slotDuration": "Длительность слота",
+    "minutes": "мин",
+    "price": "Цена",
+    "noCourts": "В данный момент нет доступных кортов"
+  },
+  "booking": {
+    "title": "Бронирование корта",
+    "selectDate": "Выберите дату",
+    "availableSlots": "Доступные слоты",
+    "noSlots": "Нет доступных слотов на эту дату",
+    "confirmTitle": "Подтвердите бронирование",
+    "court": "Корт",
+    "date": "Дата",
+    "time": "Время",
+    "booked": "Занято",
+    "taken": "Занято",
+    "past": "Прошло",
+    "available": "Доступно",
+    "success": "Бронирование подтверждено!",
+    "errors": {
+      "overlap": "Этот слот уже недоступен",
+      "pastDate": "Нельзя забронировать слот в прошлом",
+      "unauthorized": "Войдите, чтобы забронировать корт"
+    }
+  },
+  "myBookings": {
+    "title": "Мои бронирования",
+    "upcoming": "Предстоящие",
+    "past": "Прошедшие",
+    "cancelled": "Отменённые",
+    "cancelBooking": "Отменить бронирование",
+    "cancelConfirm": "Вы уверены, что хотите отменить это бронирование?",
+    "cancelSuccess": "Бронирование отменено",
+    "noBookings": "У вас пока нет бронирований",
+    "bookNow": "Забронировать корт"
+  },
+  "profile": {
+    "title": "Профиль",
+    "personalInfo": "Личная информация",
+    "changePassword": "Изменить пароль",
+    "currentPassword": "Текущий пароль",
+    "newPassword": "Новый пароль",
+    "confirmNewPassword": "Подтвердите новый пароль",
+    "updateSuccess": "Профиль обновлён",
+    "passwordSuccess": "Пароль изменён",
+    "errors": {
+      "wrongPassword": "Неверный текущий пароль"
+    }
+  },
+  "admin": {
+    "dashboard": "Панель управления",
+    "courts": "Корты",
+    "bookings": "Бронирования",
+    "users": "Пользователи",
+    "createCourt": "Создать корт",
+    "editCourt": "Редактировать корт",
+    "courtName": "Название корта (English)",
+    "courtNameRu": "Название корта (Русский)",
+    "description": "Описание (English)",
+    "descriptionRu": "Описание (Русский)",
+    "surfaceType": "Тип покрытия",
+    "indoorCourt": "Крытый корт",
+    "openTime": "Время открытия",
+    "closeTime": "Время закрытия",
+    "slotDuration": "Длительность слота (минуты)",
+    "pricePerSlot": "Цена за слот",
+    "active": "Активный",
+    "inactive": "Неактивный",
+    "stats": {
+      "totalCourts": "Активные корты",
+      "bookingsToday": "Бронирований сегодня",
+      "totalUsers": "Всего пользователей",
+      "monthlyBookings": "Бронирований за месяц"
+    },
+    "user": "Пользователь",
+    "role": "Роль",
+    "joined": "Дата регистрации",
+    "changeRole": "Изменить роль",
+    "confirmRoleChange": "Вы уверены, что хотите изменить роль пользователя?",
+    "courtCreated": "Корт создан",
+    "courtUpdated": "Корт обновлён"
+  }
+}

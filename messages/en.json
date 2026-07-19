@@ -1,0 +1,156 @@
+{
+  "common": {
+    "appName": "NashKort",
+    "loading": "Loading...",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "back": "Back",
+    "search": "Search...",
+    "actions": "Actions",
+    "status": "Status",
+    "noResults": "No results found",
+    "error": "An error occurred",
+    "success": "Success"
+  },
+  "nav": {
+    "courts": "Courts",
+    "myBookings": "My Bookings",
+    "profile": "Profile",
+    "admin": "Admin Panel",
+    "login": "Sign In",
+    "register": "Sign Up",
+    "logout": "Sign Out"
+  },
+  "home": {
+    "title": "Book Your Tennis Court",
+    "subtitle": "Find and reserve tennis courts quickly and easily",
+    "viewCourts": "View Courts",
+    "features": {
+      "easy": "Easy Booking",
+      "easyDesc": "Book a court in just a few clicks",
+      "multiple": "Multiple Courts",
+      "multipleDesc": "Choose from a variety of courts and surfaces",
+      "manage": "Manage Bookings",
+      "manageDesc": "View, manage, and cancel your bookings anytime"
+    }
+  },
+  "auth": {
+    "loginTitle": "Sign In",
+    "registerTitle": "Create Account",
+    "email": "Email",
+    "password": "Password",
+    "confirmPassword": "Confirm Password",
+    "name": "Full Name",
+    "phone": "Phone Number",
+    "noAccount": "Don't have an account?",
+    "hasAccount": "Already have an account?",
+    "loginButton": "Sign In",
+    "registerButton": "Create Account",
+    "errors": {
+      "invalidCredentials": "Invalid email or password",
+      "emailExists": "This email is already registered",
+      "passwordMismatch": "Passwords do not match",
+      "required": "This field is required",
+      "invalidEmail": "Please enter a valid email"
+    }
+  },
+  "courts": {
+    "title": "Tennis Courts",
+    "surface": {
+      "HARD": "Hard",
+      "CLAY": "Clay",
+      "GRASS": "Grass",
+      "CARPET": "Carpet",
+      "ARTIFICIAL": "Artificial"
+    },
+    "indoor": "Indoor",
+    "outdoor": "Outdoor",
+    "bookNow": "Book Now",
+    "perSlot": "per slot",
+    "details": "Court Details",
+    "operatingHours": "Operating Hours",
+    "slotDuration": "Slot Duration",
+    "minutes": "min",
+    "price": "Price",
+    "noCourts": "No courts available at the moment"
+  },
+  "booking": {
+    "title": "Book a Court",
+    "selectDate": "Select a date",
+    "availableSlots": "Available Time Slots",
+    "noSlots": "No available time slots for this date",
+    "confirmTitle": "Confirm Your Booking",
+    "court": "Court",
+    "date": "Date",
+    "time": "Time",
+    "booked": "Booked",
+    "taken": "Taken",
+    "past": "Past",
+    "available": "Available",
+    "success": "Booking confirmed!",
+    "errors": {
+      "overlap": "This time slot is no longer available",
+      "pastDate": "Cannot book a slot in the past",
+      "unauthorized": "Please sign in to book a court"
+    }
+  },
+  "myBookings": {
+    "title": "My Bookings",
+    "upcoming": "Upcoming",
+    "past": "Past",
+    "cancelled": "Cancelled",
+    "cancelBooking": "Cancel Booking",
+    "cancelConfirm": "Are you sure you want to cancel this booking?",
+    "cancelSuccess": "Booking cancelled successfully",
+    "noBookings": "You have no bookings yet",
+    "bookNow": "Book a Court"
+  },
+  "profile": {
+    "title": "Profile",
+    "personalInfo": "Personal Information",
+    "changePassword": "Change Password",
+    "currentPassword": "Current Password",
+    "newPassword": "New Password",
+    "confirmNewPassword": "Confirm New Password",
+    "updateSuccess": "Profile updated successfully",
+    "passwordSuccess": "Password changed successfully",
+    "errors": {
+      "wrongPassword": "Current password is incorrect"
+    }
+  },
+  "admin": {
+    "dashboard": "Dashboard",
+    "courts": "Courts",
+    "bookings": "Bookings",
+    "users": "Users",
+    "createCourt": "Create Court",
+    "editCourt": "Edit Court",
+    "courtName": "Court Name (English)",
+    "courtNameRu": "Court Name (Russian)",
+    "description": "Description (English)",
+    "descriptionRu": "Description (Russian)",
+    "surfaceType": "Surface Type",
+    "indoorCourt": "Indoor Court",
+    "openTime": "Opening Time",
+    "closeTime": "Closing Time",
+    "slotDuration": "Slot Duration (minutes)",
+    "pricePerSlot": "Price per Slot",
+    "active": "Active",
+    "inactive": "Inactive",
+    "stats": {
+      "totalCourts": "Active Courts",
+      "bookingsToday": "Bookings Today",
+      "totalUsers": "Total Users",
+      "monthlyBookings": "Monthly Bookings"
+    },
+    "user": "User",
+    "role": "Role",
+    "joined": "Joined",
+    "changeRole": "Change Role",
+    "confirmRoleChange": "Are you sure you want to change this user's role?",
+    "courtCreated": "Court created successfully",
+    "courtUpdated": "Court updated successfully"
+  }
+}
