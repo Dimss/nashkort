@@ -3,6 +3,7 @@
 import { useState, useEffect, useTransition } from "react"
 import { useTranslations, useLocale } from "next-intl"
 import { format } from "date-fns"
+import { ru } from "date-fns/locale"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -15,6 +16,7 @@ type Slot = {
   endTime: string
   status: "available" | "booked" | "mine" | "past"
   bookedBy: string | null
+  isPast: boolean
 }
 
 type Court = {
@@ -89,6 +91,8 @@ export function ReadonlyCalendar({ courts }: { courts: Court[] }) {
               selected={selectedDate}
               onSelect={setSelectedDate}
               disabled={(date) => date < today || date > maxDate}
+              locale={locale === "ru" ? ru : undefined}
+              weekStartsOn={0}
             />
           </CardContent>
         </Card>
@@ -139,7 +143,9 @@ export function ReadonlyCalendar({ courts }: { courts: Court[] }) {
                         slot.status === "booked" &&
                           "bg-red-50 border-red-200 text-red-400",
                         slot.status === "past" &&
-                          "bg-gray-50 border-gray-200 text-gray-400"
+                          "bg-gray-50 border-gray-200 text-gray-400",
+                        slot.isPast && (slot.status === "mine" || slot.status === "booked") &&
+                          "opacity-50"
                       )}
                     >
                       {slot.startTime}

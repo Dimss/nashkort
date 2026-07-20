@@ -8,6 +8,7 @@ type Slot = {
   endTime: string
   status: "available" | "booked" | "mine" | "past"
   bookedBy: string | null
+  isPast: boolean
 }
 
 export function TimeSlotGrid({
@@ -52,7 +53,9 @@ export function TimeSlotGrid({
               slot.status === "booked" &&
                 "bg-red-50 border-red-200 text-red-400 cursor-not-allowed",
               slot.status === "past" &&
-                "bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed"
+                "bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed",
+              slot.isPast && (slot.status === "mine" || slot.status === "booked") &&
+                "opacity-50"
             )}
           >
             <div className="text-sm md:text-xs">{slot.startTime}</div>

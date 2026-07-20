@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useEffect, useTransition } from "react"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 import { format } from "date-fns"
+import { ru } from "date-fns/locale"
 import { Calendar } from "@/components/ui/calendar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -16,12 +17,14 @@ type Slot = {
   endTime: string
   status: "available" | "booked" | "mine" | "past"
   bookedBy: string | null
+  isPast: boolean
 }
 
 
 export function BookingCalendar({ courtId, courtName }: { courtId: string; courtName: string }) {
   const t = useTranslations("booking")
   const tc = useTranslations("common")
+  const locale = useLocale()
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date())
   const [slots, setSlots] = useState<Slot[]>([])
   const [selectedSlots, setSelectedSlots] = useState<Slot[]>([])
@@ -75,6 +78,8 @@ export function BookingCalendar({ courtId, courtName }: { courtId: string; court
             selected={selectedDate}
             onSelect={setSelectedDate}
             disabled={(date) => date < today || date > maxDate}
+            locale={locale === "ru" ? ru : undefined}
+            weekStartsOn={0}
           />
         </CardContent>
       </Card>

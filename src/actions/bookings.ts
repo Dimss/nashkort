@@ -73,7 +73,7 @@ export async function getAvailableSlots(courtId: string, dateStr: string) {
     const isMine = isBooked && currentUserId !== null && booking.userId === currentUserId
     const [slotH, slotM] = slot.startTime.split(":").map(Number)
     const slotMinutes = slotH * 60 + slotM
-    const isPast = dateStr === today && slotMinutes <= currentMinutes
+    const isPast = dateStr < today || (dateStr === today && slotMinutes <= currentMinutes)
 
     let status: "available" | "booked" | "mine" | "past"
     if (isBeyondWindow) status = "past"
@@ -82,7 +82,7 @@ export async function getAvailableSlots(courtId: string, dateStr: string) {
     else if (isPast) status = "past"
     else status = "available"
 
-    return { ...slot, status, bookedBy: isBooked ? booking.name : null }
+    return { ...slot, status, isPast, bookedBy: isBooked ? booking.name : null }
   })
 }
 
