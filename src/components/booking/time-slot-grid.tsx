@@ -23,7 +23,7 @@ export function TimeSlotGrid({
   const selectedTimes = new Set(selectedSlots.map((s) => s.startTime))
 
   return (
-    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-2">
+    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-3 md:gap-2">
       {slots.map((slot) => {
         const isSelected = selectedTimes.has(slot.startTime)
 
@@ -42,7 +42,7 @@ export function TimeSlotGrid({
             onClick={() => onSlotToggle(slot)}
             disabled={slot.status !== "available"}
             className={cn(
-              "relative group p-2 rounded-md text-sm font-medium border transition-colors",
+              "relative group p-3 md:p-2 rounded-md text-base md:text-sm font-medium border transition-colors",
               slot.status === "available" && !isSelected &&
                 "bg-green-50 border-green-200 text-green-700 hover:bg-green-100 cursor-pointer",
               slot.status === "available" && isSelected &&
@@ -55,8 +55,8 @@ export function TimeSlotGrid({
                 "bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed"
             )}
           >
-            <div className="text-xs">{slot.startTime}</div>
-            <div className="text-[10px] mt-0.5 opacity-70">
+            <div className="text-sm md:text-xs">{slot.startTime}</div>
+            <div className="text-xs md:text-[10px] mt-0.5 opacity-70">
               {slot.status === "available"
                 ? isSelected
                   ? "✓"

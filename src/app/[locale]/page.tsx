@@ -13,7 +13,7 @@ export default async function HomePage() {
 
       <main className="flex-1">
         {courts.length > 0 && (
-          <section className="py-12 bg-muted/50">
+          <section className="py-6 md:py-12 bg-muted/50">
             <div className="container mx-auto px-4">
               <ReadonlyCalendar courts={courts} />
             </div>

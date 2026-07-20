@@ -69,7 +69,7 @@ export function BookingCalendar({ courtId, courtName }: { courtId: string; court
         <CardHeader>
           <CardTitle>{t("selectDate")}</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex justify-center">
           <Calendar
             mode="single"
             selected={selectedDate}

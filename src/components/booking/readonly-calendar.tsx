@@ -66,7 +66,7 @@ export function ReadonlyCalendar({ courts }: { courts: Court[] }) {
               key={court.id}
               onClick={() => setSelectedCourt(court.id)}
               className={cn(
-                "px-4 py-2 rounded-md text-sm font-medium border transition-colors",
+                "px-5 py-3 md:px-4 md:py-2 rounded-md text-base md:text-sm font-medium border transition-colors",
                 selectedCourt === court.id
                   ? "bg-primary text-primary-foreground border-primary"
                   : "bg-background hover:bg-muted border-border"
@@ -83,7 +83,7 @@ export function ReadonlyCalendar({ courts }: { courts: Court[] }) {
           <CardHeader>
             <CardTitle>{t("selectDate")}</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex justify-center">
             <Calendar
               mode="single"
               selected={selectedDate}
@@ -95,9 +95,9 @@ export function ReadonlyCalendar({ courts }: { courts: Court[] }) {
 
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <CardTitle>{t("availableSlots")}</CardTitle>
-              <div className="flex gap-2 text-xs">
+              <div className="flex gap-2 text-sm md:text-xs">
                 <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
                   {t("available")}
                 </Badge>
@@ -116,7 +116,7 @@ export function ReadonlyCalendar({ courts }: { courts: Court[] }) {
             ) : slots.length === 0 ? (
               <p className="text-muted-foreground">{t("noSlots")}</p>
             ) : (
-              <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 gap-1.5">
+              <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 gap-2 md:gap-1.5">
                 {slots.map((slot) => {
                   const tooltip =
                     slot.status === "available"
@@ -131,7 +131,7 @@ export function ReadonlyCalendar({ courts }: { courts: Court[] }) {
                     <div
                       key={slot.startTime}
                       className={cn(
-                        "relative group p-1.5 rounded text-xs font-medium text-center border cursor-default",
+                        "relative group p-2.5 md:p-1.5 rounded text-sm md:text-xs font-medium text-center border cursor-default",
                         slot.status === "available" &&
                           "bg-green-50 border-green-200 text-green-700",
                         slot.status === "mine" &&

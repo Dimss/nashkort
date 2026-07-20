@@ -22,7 +22,7 @@ export function Header() {
 
   return (
     <header className="border-b">
-      <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+      <div className="container mx-auto px-4 py-4 md:py-3 flex items-center justify-between">
         <div className="flex items-center gap-6">
           <Link href="/" className="text-xl font-bold">
             {t("common.appName")}
@@ -49,11 +49,11 @@ export function Header() {
 
           {/* Mobile menu button */}
           <button
-            className="md:hidden p-2"
+            className="md:hidden p-3"
             onClick={() => setMobileOpen(!mobileOpen)}
             aria-label="Menu"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               {mobileOpen ? (
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               ) : (
@@ -105,7 +105,7 @@ export function Header() {
         <nav className="md:hidden border-t px-4 py-3 space-y-2">
           <Link
             href="/courts"
-            className="block py-2 text-sm"
+            className="block py-3 text-base"
             onClick={() => setMobileOpen(false)}
           >
             {t("nav.courts")}
@@ -113,7 +113,7 @@ export function Header() {
           {session && (
             <Link
               href="/bookings"
-              className="block py-2 text-sm"
+              className="block py-3 text-base"
               onClick={() => setMobileOpen(false)}
             >
               {t("nav.myBookings")}
@@ -122,7 +122,7 @@ export function Header() {
           {session?.user?.role === "ADMIN" && (
             <Link
               href="/admin"
-              className="block py-2 text-sm"
+              className="block py-3 text-base"
               onClick={() => setMobileOpen(false)}
             >
               {t("nav.admin")}
@@ -132,13 +132,13 @@ export function Header() {
             <>
               <Link
                 href="/profile"
-                className="block py-2 text-sm"
+                className="block py-3 text-base"
                 onClick={() => setMobileOpen(false)}
               >
                 {t("nav.profile")}
               </Link>
               <button
-                className="block py-2 text-sm text-destructive"
+                className="block py-3 text-base text-destructive"
                 onClick={() => signOut({ callbackUrl: "/" })}
               >
                 {t("nav.logout")}
