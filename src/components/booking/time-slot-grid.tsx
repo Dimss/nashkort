@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 type Slot = {
   startTime: string
   endTime: string
-  status: "available" | "booked" | "past"
+  status: "available" | "booked" | "mine" | "past"
   bookedBy: string | null
 }
 
@@ -27,17 +27,28 @@ export function TimeSlotGrid({
       {slots.map((slot) => {
         const isSelected = selectedTimes.has(slot.startTime)
 
+        const tooltip =
+          slot.status === "available"
+            ? `${slot.startTime} - ${slot.endTime} · ${t("available")}`
+            : slot.status === "mine"
+            ? `${slot.startTime} - ${slot.endTime} · ${t("mySlot")}`
+            : slot.status === "booked"
+            ? `${slot.startTime} - ${slot.endTime} · ${t("taken")}${slot.bookedBy ? ` · ${slot.bookedBy}` : ""}`
+            : null
+
         return (
           <button
             key={slot.startTime}
             onClick={() => onSlotToggle(slot)}
             disabled={slot.status !== "available"}
             className={cn(
-              "p-2 rounded-md text-sm font-medium border transition-colors",
+              "relative group p-2 rounded-md text-sm font-medium border transition-colors",
               slot.status === "available" && !isSelected &&
                 "bg-green-50 border-green-200 text-green-700 hover:bg-green-100 cursor-pointer",
               slot.status === "available" && isSelected &&
                 "bg-primary border-primary text-primary-foreground cursor-pointer",
+              slot.status === "mine" &&
+                "bg-blue-50 border-blue-200 text-blue-700 cursor-not-allowed",
               slot.status === "booked" &&
                 "bg-red-50 border-red-200 text-red-400 cursor-not-allowed",
               slot.status === "past" &&
@@ -50,10 +61,17 @@ export function TimeSlotGrid({
                 ? isSelected
                   ? "✓"
                   : t("available")
+                : slot.status === "mine"
+                ? t("mySlot")
                 : slot.status === "booked"
                 ? t("booked")
                 : t("past")}
             </div>
+            {tooltip && (
+              <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block whitespace-nowrap rounded bg-foreground px-2 py-1 text-[11px] text-background shadow z-50">
+                {tooltip}
+              </span>
+            )}
           </button>
         )
       })}

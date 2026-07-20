@@ -7,6 +7,9 @@ import { revalidatePath } from "next/cache"
 import {
   CANCELLATION_DEADLINE_HOURS,
   getMaxBookableDate,
+  todayDateStr,
+  currentMinutesInTimezone,
+  nowInTimezone,
 } from "@/lib/constants"
 
 const bookingSchema = z.object({
@@ -21,6 +24,9 @@ const bookingSchema = z.object({
 })
 
 export async function getAvailableSlots(courtId: string, dateStr: string) {
+  const session = await auth()
+  const currentUserId = session?.user?.id || null
+
   const court = await db.court.findUnique({ where: { id: courtId } })
   if (!court) return []
 
@@ -42,40 +48,41 @@ export async function getAvailableSlots(courtId: string, dateStr: string) {
     })
   }
 
-  const date = new Date(dateStr + "T00:00:00")
+  const date = new Date(dateStr + "T00:00:00Z")
   const bookings = await db.booking.findMany({
     where: {
       courtId,
       date,
       status: "CONFIRMED",
     },
-    select: { startTime: true, user: { select: { name: true } } },
+    select: { startTime: true, userId: true, user: { select: { name: true } } },
   })
 
-  const bookedMap = new Map(bookings.map((b) => [b.startTime, b.user?.name || null]))
+  const bookedMap = new Map(bookings.map((b) => [b.startTime, { name: b.user?.name || null, userId: b.userId }]))
 
-  const now = new Date()
-  const today = now.toISOString().split("T")[0]
-  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+  const today = todayDateStr()
+  const currentMinutes = currentMinutesInTimezone()
 
   const maxDate = getMaxBookableDate()
-  const requestedDate = new Date(dateStr + "T12:00:00")
+  const requestedDate = new Date(dateStr + "T12:00:00Z")
   const isBeyondWindow = requestedDate > maxDate
 
   return allSlots.map((slot) => {
-    const bookedBy = bookedMap.get(slot.startTime)
-    const isBooked = bookedBy !== undefined
+    const booking = bookedMap.get(slot.startTime)
+    const isBooked = booking !== undefined
+    const isMine = isBooked && currentUserId !== null && booking.userId === currentUserId
     const [slotH, slotM] = slot.startTime.split(":").map(Number)
     const slotMinutes = slotH * 60 + slotM
     const isPast = dateStr === today && slotMinutes <= currentMinutes
 
-    let status: "available" | "booked" | "past"
+    let status: "available" | "booked" | "mine" | "past"
     if (isBeyondWindow) status = "past"
+    else if (isMine) status = "mine"
     else if (isBooked) status = "booked"
     else if (isPast) status = "past"
     else status = "available"
 
-    return { ...slot, status, bookedBy: isBooked ? bookedBy : null }
+    return { ...slot, status, bookedBy: isBooked ? booking.name : null }
   })
 }
 
@@ -95,18 +102,20 @@ export async function createBooking(data: {
   }
 
   const { courtId, date: dateStr, slots } = parsed.data
-  const date = new Date(dateStr + "T00:00:00")
+  const date = new Date(dateStr + "T00:00:00Z")
 
-  const now = new Date()
-  const today = now.toISOString().split("T")[0]
+  console.log("createBooking:", { courtId, dateStr, date: date.toISOString(), slots, userId: session.user.id })
+
+  const today = todayDateStr()
+  const currentMinutes = currentMinutesInTimezone()
   const firstSlot = slots[0]
   const [slotH, slotM] = firstSlot.startTime.split(":").map(Number)
-  if (dateStr < today || (dateStr === today && slotH * 60 + slotM <= now.getHours() * 60 + now.getMinutes())) {
+  if (dateStr < today || (dateStr === today && slotH * 60 + slotM <= currentMinutes)) {
     return { error: "PAST_DATE" }
   }
 
   const maxDate = getMaxBookableDate()
-  const requestedDate = new Date(dateStr + "T12:00:00")
+  const requestedDate = new Date(dateStr + "T12:00:00Z")
   if (requestedDate > maxDate) {
     return { error: "TOO_FAR_AHEAD" }
   }
@@ -122,11 +131,12 @@ export async function createBooking(data: {
   })
 
   if (overlapping) {
+    console.log("OVERLAP: found existing booking", overlapping)
     return { error: "OVERLAP" }
   }
 
   try {
-    await db.booking.createMany({
+    const result = await db.booking.createMany({
       data: slots.map((slot) => ({
         courtId,
         userId: session.user.id,
@@ -135,7 +145,9 @@ export async function createBooking(data: {
         endTime: slot.endTime,
       })),
     })
-  } catch {
+    console.log("Booking created:", result)
+  } catch (e) {
+    console.error("Booking createMany failed:", e)
     return { error: "OVERLAP" }
   }
 
@@ -163,10 +175,11 @@ export async function cancelBooking(bookingId: string) {
   }
 
   if (!isAdmin) {
+    const now = nowInTimezone()
     const bookingDate = new Date(booking.date)
     const [h, m] = booking.startTime.split(":").map(Number)
     bookingDate.setHours(h, m, 0, 0)
-    const hoursUntil = (bookingDate.getTime() - Date.now()) / (1000 * 60 * 60)
+    const hoursUntil = (bookingDate.getTime() - now.getTime()) / (1000 * 60 * 60)
     if (hoursUntil < CANCELLATION_DEADLINE_HOURS) {
       return { error: "TOO_LATE" }
     }

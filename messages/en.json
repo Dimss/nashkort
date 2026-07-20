@@ -89,6 +89,7 @@
     "taken": "Taken",
     "past": "Past",
     "available": "Available",
+    "mySlot": "My booking",
     "success": "Booking confirmed!",
     "errors": {
       "overlap": "This time slot is no longer available",

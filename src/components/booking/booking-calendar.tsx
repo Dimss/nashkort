@@ -14,7 +14,7 @@ import { BookingDialog } from "@/components/booking/booking-dialog"
 type Slot = {
   startTime: string
   endTime: string
-  status: "available" | "booked" | "past"
+  status: "available" | "booked" | "mine" | "past"
   bookedBy: string | null
 }
 

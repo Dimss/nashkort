@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils"
 type Slot = {
   startTime: string
   endTime: string
-  status: "available" | "booked" | "past"
+  status: "available" | "booked" | "mine" | "past"
   bookedBy: string | null
 }
 
@@ -101,6 +101,9 @@ export function ReadonlyCalendar({ courts }: { courts: Court[] }) {
                 <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
                   {t("available")}
                 </Badge>
+                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                  {t("mySlot")}
+                </Badge>
                 <Badge variant="outline" className="bg-red-50 text-red-400 border-red-200">
                   {t("booked")}
                 </Badge>
@@ -118,6 +121,8 @@ export function ReadonlyCalendar({ courts }: { courts: Court[] }) {
                   const tooltip =
                     slot.status === "available"
                       ? `${slot.startTime} - ${slot.endTime} · ${t("available")}`
+                      : slot.status === "mine"
+                      ? `${slot.startTime} - ${slot.endTime} · ${t("mySlot")}`
                       : slot.status === "booked"
                       ? `${slot.startTime} - ${slot.endTime} · ${t("taken")}${slot.bookedBy ? ` · ${slot.bookedBy}` : ""}`
                       : null
@@ -129,6 +134,8 @@ export function ReadonlyCalendar({ courts }: { courts: Court[] }) {
                         "relative group p-1.5 rounded text-xs font-medium text-center border cursor-default",
                         slot.status === "available" &&
                           "bg-green-50 border-green-200 text-green-700",
+                        slot.status === "mine" &&
+                          "bg-blue-50 border-blue-200 text-blue-700",
                         slot.status === "booked" &&
                           "bg-red-50 border-red-200 text-red-400",
                         slot.status === "past" &&
