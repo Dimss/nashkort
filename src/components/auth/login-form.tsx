@@ -23,9 +23,7 @@ export function LoginForm() {
       if (result?.error) {
         setError(t("errors.invalidCredentials"))
       } else {
-        toast.success(t("loginTitle"))
-        router.push("/courts")
-        router.refresh()
+        window.location.href = "/courts"
       }
     })
   }

@@ -33,9 +33,7 @@ export function RegisterForm() {
       } else if (result?.error) {
         setError(t("errors.invalidCredentials"))
       } else {
-        toast.success(t("registerTitle"))
-        router.push("/courts")
-        router.refresh()
+        window.location.href = "/courts"
       }
     })
   }
