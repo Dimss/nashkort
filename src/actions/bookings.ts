@@ -136,18 +136,27 @@ export async function createBooking(data: {
   }
 
   try {
-    const result = await db.booking.createMany({
-      data: slots.map((slot) => ({
-        courtId,
-        userId: session.user.id,
-        date,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-      })),
-    })
-    console.log("Booking created:", result)
+    await db.$transaction([
+      db.booking.deleteMany({
+        where: {
+          courtId,
+          date,
+          status: "CANCELLED",
+          startTime: { in: startTimes },
+        },
+      }),
+      db.booking.createMany({
+        data: slots.map((slot) => ({
+          courtId,
+          userId: session.user.id,
+          date,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+        })),
+      }),
+    ])
   } catch (e) {
-    console.error("Booking createMany failed:", e)
+    console.error("Booking failed:", e)
     return { error: "OVERLAP" }
   }
 
