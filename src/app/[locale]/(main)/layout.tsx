@@ -7,7 +7,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       <main className="flex-1 container mx-auto px-4 py-8">{children}</main>
       <footer className="border-t py-6">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          © 2024 NashKort
+          © {new Date().getFullYear()} NashKort
         </div>
       </footer>
     </div>

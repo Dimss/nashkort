@@ -4,7 +4,11 @@ import { PrismaPg } from "@prisma/adapter-pg"
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined }
 
 function createPrismaClient() {
-  const adapter = new PrismaPg(process.env.DATABASE_URL!)
+  const url = process.env.DATABASE_URL!
+  const connectionString = url.includes("uselibpqcompat")
+    ? url
+    : url + (url.includes("?") ? "&" : "?") + "uselibpqcompat=true"
+  const adapter = new PrismaPg(connectionString)
   return new PrismaClient({ adapter })
 }
 
