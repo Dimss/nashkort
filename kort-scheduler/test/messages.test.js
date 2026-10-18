@@ -2,13 +2,16 @@ import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { freshData } from './helpers/tempdata.js'
 
-let env, messages
+let env, messages, owner
 const HOUR = 60 * 60 * 1000
-const row = (over = {}) => ({ groupJid: 'g1@g.us', groupName: 'Court', message: 'hi', sendAt: Date.now() + HOUR, ...over })
+const row = (over = {}) => ({ ownerId: owner.id, groupJid: 'g1@g.us', groupName: 'Court', message: 'hi', sendAt: Date.now() + HOUR, ...over })
 
 before(async () => {
   env = await freshData()
-  ;({ messages } = await env.load('db.js'))
+  const db = await env.load('db.js')
+  messages = db.messages
+  owner = db.users.insertPending({ email: 'o@x', sub: 'auth0|o' })
+  db.users.setState(owner.id, 'approved')
 })
 after(() => env.cleanup())
 
@@ -37,16 +40,16 @@ test('claim succeeds once and fails for the same id afterwards', () => {
   const m = messages.create(row({ sendAt: Date.now() - HOUR }))
   assert.equal(messages.claim(m.id), true)
   assert.equal(messages.claim(m.id), false)
-  assert.equal(messages.get(m.id).status, 'sending')
+  assert.equal(messages.get(m.id, owner.id).status, 'sending')
 })
 
 test('cancel works only on pending rows; delete refuses a row that is being sent', () => {
   const pending = messages.create(row())
-  assert.equal(messages.cancel(pending.id), true)
-  assert.equal(messages.cancel(pending.id), false)
+  assert.equal(messages.cancel(pending.id, owner.id), true)
+  assert.equal(messages.cancel(pending.id, owner.id), false)
   const sending = messages.create(row({ sendAt: Date.now() - HOUR }))
   messages.claim(sending.id)
-  assert.equal(messages.delete(sending.id), false)
+  assert.equal(messages.delete(sending.id, owner.id), false)
   messages.markSent(sending.id)
-  assert.equal(messages.delete(sending.id), true)
+  assert.equal(messages.delete(sending.id, owner.id), true)
 })

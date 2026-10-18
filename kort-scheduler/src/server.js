@@ -83,8 +83,8 @@ export function createApp() {
     }
   })
 
-  app.get('/api/messages', (_req, res) => {
-    res.json(messages.list())
+  app.get('/api/messages', (req, res) => {
+    res.json(messages.list(req.user.user_id))
   })
 
   app.post('/api/messages', (req, res) => {
@@ -107,6 +107,7 @@ export function createApp() {
     if (!REPEAT_RULES.has(repeatRule)) return res.status(400).json({ error: 'Invalid repeat option.' })
 
     const row = messages.create({
+      ownerId: req.user.user_id,
       groupJid,
       groupName: typeof groupName === 'string' ? groupName : null,
       message: text,
@@ -118,16 +119,20 @@ export function createApp() {
 
   app.post('/api/messages/:id/cancel', (req, res) => {
     const id = Number(req.params.id)
-    if (!messages.cancel(id)) {
+    const owner = req.user.user_id
+    if (!messages.get(id, owner)) return res.status(404).json({ error: 'Message not found.' })
+    if (!messages.cancel(id, owner)) {
       return res.status(409).json({ error: 'Only pending messages can be cancelled.' })
     }
-    res.json(messages.get(id))
+    res.json(messages.get(id, owner))
   })
 
   app.delete('/api/messages/:id', (req, res) => {
     const id = Number(req.params.id)
-    if (!messages.delete(id)) {
-      return res.status(409).json({ error: 'Message not found or is being sent right now.' })
+    const owner = req.user.user_id
+    if (!messages.get(id, owner)) return res.status(404).json({ error: 'Message not found.' })
+    if (!messages.delete(id, owner)) {
+      return res.status(409).json({ error: 'Message is being sent right now.' })
     }
     res.status(204).end()
   })

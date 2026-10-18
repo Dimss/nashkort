@@ -1,106 +1,105 @@
-import { DatabaseSync } from 'node:sqlite'
-import { config } from './config.js'
+import { config, normalizeEmail } from './config.js'
+import { openDatabase } from './migrations.js'
 
-const db = new DatabaseSync(config.dbPath)
-db.exec('PRAGMA journal_mode = WAL')
-db.exec(`
-  CREATE TABLE IF NOT EXISTS scheduled_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_jid TEXT NOT NULL,
-    group_name TEXT,
-    message TEXT NOT NULL,
-    send_at INTEGER NOT NULL,           -- epoch ms
-    status TEXT NOT NULL DEFAULT 'pending', -- pending | sending | sent | failed | cancelled
-    attempts INTEGER NOT NULL DEFAULT 0,
-    next_attempt_at INTEGER,            -- epoch ms, for retries
-    error TEXT,
-    created_at INTEGER NOT NULL,
-    sent_at INTEGER,
-    repeat_rule TEXT NOT NULL DEFAULT 'none', -- none | weekly | monthly
-    series_id INTEGER                   -- groups occurrences of the same recurring message
-  );
-  CREATE INDEX IF NOT EXISTS idx_sched_status_send_at ON scheduled_messages(status, send_at);
-
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    created_at INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
-`)
-
-// Migrate databases created before repeat support existed.
-for (const stmt of [
-  `ALTER TABLE scheduled_messages ADD COLUMN repeat_rule TEXT NOT NULL DEFAULT 'none'`,
-  `ALTER TABLE scheduled_messages ADD COLUMN series_id INTEGER`,
-]) {
-  try { db.exec(stmt) } catch (err) { if (!/duplicate column/i.test(err.message)) throw err }
-}
+export const database = openDatabase(config.dbPath, { adminEmail: config.adminEmail || null, backupPath: config.backupPath })
+const db = database
 
 // Any row stuck in 'sending' from a previous crash goes back to pending.
 db.prepare(`UPDATE scheduled_messages SET status = 'pending' WHERE status = 'sending'`).run()
 
+// Runs fn inside one BEGIN IMMEDIATE transaction. Synchronous only: never await inside.
+export function transaction(fn) {
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const result = fn()
+    db.exec('COMMIT')
+    return result
+  } catch (err) {
+    db.exec('ROLLBACK')
+    throw err
+  }
+}
+
 const stmts = {
   insert: db.prepare(`
-    INSERT INTO scheduled_messages (group_jid, group_name, message, send_at, repeat_rule, series_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_messages (owner_id, group_jid, group_name, message, send_at, repeat_rule, series_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `),
   setSeriesId: db.prepare(`UPDATE scheduled_messages SET series_id = ? WHERE id = ?`),
-  list: db.prepare(`SELECT * FROM scheduled_messages ORDER BY send_at DESC, id DESC LIMIT ?`),
-  get: db.prepare(`SELECT * FROM scheduled_messages WHERE id = ?`),
+  list: db.prepare(`SELECT * FROM scheduled_messages WHERE owner_id = ? ORDER BY send_at DESC, id DESC LIMIT ?`),
+  getOwned: db.prepare(`SELECT * FROM scheduled_messages WHERE id = ? AND owner_id = ?`),
+  getById: db.prepare(`SELECT * FROM scheduled_messages WHERE id = ?`),
   due: db.prepare(`
-    SELECT * FROM scheduled_messages
-    WHERE status = 'pending' AND send_at <= ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-    ORDER BY send_at ASC
+    SELECT m.* FROM scheduled_messages m
+    JOIN users u ON u.id = m.owner_id
+    WHERE m.status = 'pending' AND u.state = 'approved'
+      AND m.send_at <= ? AND (m.next_attempt_at IS NULL OR m.next_attempt_at <= ?)
+    ORDER BY m.send_at ASC
   `),
-  claim: db.prepare(`UPDATE scheduled_messages SET status = 'sending' WHERE id = ? AND status = 'pending'`),
+  claim: db.prepare(`
+    UPDATE scheduled_messages SET status = 'sending'
+    WHERE id = ? AND status = 'pending'
+      AND EXISTS (SELECT 1 FROM users WHERE users.id = scheduled_messages.owner_id AND users.state = 'approved')
+  `),
   markSent: db.prepare(`UPDATE scheduled_messages SET status = 'sent', sent_at = ?, error = NULL WHERE id = ?`),
   markRetry: db.prepare(`
     UPDATE scheduled_messages SET status = 'pending', attempts = ?, next_attempt_at = ?, error = ? WHERE id = ?
   `),
   markFailed: db.prepare(`UPDATE scheduled_messages SET status = 'failed', attempts = ?, error = ? WHERE id = ?`),
-  cancel: db.prepare(`UPDATE scheduled_messages SET status = 'cancelled' WHERE id = ? AND status = 'pending'`),
-  delete: db.prepare(`DELETE FROM scheduled_messages WHERE id = ? AND status != 'sending'`),
+  markMissed: db.prepare(`UPDATE scheduled_messages SET status = 'missed' WHERE id = ? AND status = 'pending'`),
+  cancel: db.prepare(`UPDATE scheduled_messages SET status = 'cancelled' WHERE id = ? AND owner_id = ? AND status = 'pending'`),
+  delete: db.prepare(`DELETE FROM scheduled_messages WHERE id = ? AND owner_id = ? AND status != 'sending'`),
+  seriesHasPending: db.prepare(`SELECT 1 FROM scheduled_messages WHERE series_id = ? AND status IN ('pending', 'sending') LIMIT 1`),
+  pastDueForOwner: db.prepare(`SELECT * FROM scheduled_messages WHERE owner_id = ? AND status = 'pending' AND send_at < ? ORDER BY send_at ASC`),
+  countOwnerless: db.prepare(`SELECT count(*) AS n FROM scheduled_messages WHERE owner_id IS NULL`),
 
-  upsertUser: db.prepare(`
-    INSERT INTO users (email, password_hash, created_at) VALUES (?, ?, ?)
-    ON CONFLICT(email) DO UPDATE SET password_hash = excluded.password_hash
+  userById: db.prepare(`SELECT * FROM users WHERE id = ?`),
+  userByEmail: db.prepare(`SELECT * FROM users WHERE email = ?`),
+  userBySub: db.prepare(`SELECT * FROM users WHERE auth0_sub = ?`),
+  insertPending: db.prepare(`INSERT INTO users (email, auth0_sub, state, created_at, last_sign_in_at) VALUES (?, ?, 'pending', ?, ?)`),
+  adoptByEmail: db.prepare(`UPDATE users SET auth0_sub = ? WHERE email = ? AND auth0_sub IS NULL`),
+  touchSignIn: db.prepare(`UPDATE users SET last_sign_in_at = ?, email = ? WHERE id = ?`),
+  setState: db.prepare(`UPDATE users SET state = ? WHERE id = ?`),
+  upsertAdmin: db.prepare(`INSERT INTO users (email, state, created_at) VALUES (?, 'approved', ?) ON CONFLICT(email) DO UPDATE SET state = 'approved'`),
+  listUsers: db.prepare(`
+    SELECT id, email, state, created_at, last_sign_in_at FROM users
+    ORDER BY CASE state WHEN 'pending' THEN 0 ELSE 1 END, created_at ASC, id ASC
   `),
-  getUserByEmail: db.prepare(`SELECT * FROM users WHERE email = ?`),
 
-  insertSession: db.prepare(`
-    INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)
-  `),
+  insertSession: db.prepare(`INSERT INTO sessions (token_hash, user_id, sid, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`),
   getSession: db.prepare(`
-    SELECT sessions.token, sessions.expires_at, users.id AS user_id, users.email
-    FROM sessions JOIN users ON users.id = sessions.user_id
-    WHERE sessions.token = ? AND sessions.expires_at > ?
+    SELECT s.token_hash, s.sid, s.expires_at, u.id AS user_id, u.email, u.state
+    FROM sessions s JOIN users u ON u.id = s.user_id
+    WHERE s.token_hash = ? AND s.expires_at > ?
   `),
-  deleteSession: db.prepare(`DELETE FROM sessions WHERE token = ?`),
+  deleteSession: db.prepare(`DELETE FROM sessions WHERE token_hash = ?`),
+  deleteSessionsForUser: db.prepare(`DELETE FROM sessions WHERE user_id = ?`),
   deleteExpiredSessions: db.prepare(`DELETE FROM sessions WHERE expires_at <= ?`),
 }
 
+function requireOwner(ownerId) {
+  if (!Number.isInteger(ownerId) || ownerId <= 0) throw new TypeError('a message needs an integer owner id')
+  return ownerId
+}
+
 export const messages = {
-  create({ groupJid, groupName, message, sendAt, repeat = 'none', seriesId = null }) {
-    const r = stmts.insert.run(groupJid, groupName ?? null, message, sendAt, repeat, seriesId, Date.now())
+  create({ ownerId, groupJid, groupName, message, sendAt, repeat = 'none', seriesId = null }) {
+    requireOwner(ownerId)
+    const r = stmts.insert.run(ownerId, groupJid, groupName ?? null, message, sendAt, repeat, seriesId, Date.now())
     const id = Number(r.lastInsertRowid)
     // First occurrence of a new series: use its own id to identify the series.
     if (repeat !== 'none' && seriesId == null) stmts.setSeriesId.run(id, id)
-    return stmts.get.get(id)
+    return stmts.getById.get(id)
   },
-  list(limit = 200) {
-    return stmts.list.all(limit)
+  list(ownerId, limit = 200) {
+    return stmts.list.all(requireOwner(ownerId), limit)
   },
-  get(id) {
-    return stmts.get.get(id)
+  get(id, ownerId) {
+    return stmts.getOwned.get(id, requireOwner(ownerId))
+  },
+  // Scheduler-internal lookup by id, not scoped to a caller.
+  getById(id) {
+    return stmts.getById.get(id)
   },
   due(now = Date.now()) {
     return stmts.due.all(now, now)
@@ -117,35 +116,79 @@ export const messages = {
   markFailed(id, attempts, error) {
     stmts.markFailed.run(attempts, error, id)
   },
-  cancel(id) {
-    return stmts.cancel.run(id).changes === 1
+  markMissed(id) {
+    return stmts.markMissed.run(id).changes === 1
   },
-  delete(id) {
-    return stmts.delete.run(id).changes === 1
+  cancel(id, ownerId) {
+    return stmts.cancel.run(id, requireOwner(ownerId)).changes === 1
+  },
+  delete(id, ownerId) {
+    return stmts.delete.run(id, requireOwner(ownerId)).changes === 1
+  },
+  seriesHasPending(seriesId) {
+    return !!stmts.seriesHasPending.get(seriesId)
+  },
+  pastDueForOwner(ownerId, now = Date.now()) {
+    return stmts.pastDueForOwner.all(requireOwner(ownerId), now)
   },
 }
 
 export const users = {
-  upsert({ email, passwordHash }) {
-    stmts.upsertUser.run(email, passwordHash, Date.now())
-    return stmts.getUserByEmail.get(email)
+  get(id) {
+    return stmts.userById.get(id)
   },
-  getByEmail(email) {
-    return stmts.getUserByEmail.get(email)
+  findByEmail(email) {
+    return stmts.userByEmail.get(normalizeEmail(email))
+  },
+  findBySub(sub) {
+    return stmts.userBySub.get(sub)
+  },
+  insertPending({ email, sub }) {
+    const now = Date.now()
+    const r = stmts.insertPending.run(normalizeEmail(email), sub, now, now)
+    return stmts.userById.get(Number(r.lastInsertRowid))
+  },
+  // Attaches a subject to a row that has none yet (legacy or bootstrapped rows). Undefined when no such row.
+  adoptByEmail(email, sub) {
+    if (stmts.adoptByEmail.run(sub, normalizeEmail(email)).changes !== 1) return undefined
+    return stmts.userBySub.get(sub)
+  },
+  touchSignIn(id, email, now = Date.now()) {
+    stmts.touchSignIn.run(now, normalizeEmail(email), id)
+  },
+  setState(id, state) {
+    return stmts.setState.run(state, id).changes === 1
+  },
+  upsertAdmin(email) {
+    const normalized = normalizeEmail(email)
+    stmts.upsertAdmin.run(normalized, Date.now())
+    return stmts.userByEmail.get(normalized)
+  },
+  list() {
+    return stmts.listUsers.all()
   },
 }
 
 export const sessions = {
-  insert(token, userId, createdAt, expiresAt) {
-    stmts.insertSession.run(token, userId, createdAt, expiresAt)
+  insert(tokenHash, userId, sid, createdAt, expiresAt) {
+    stmts.insertSession.run(tokenHash, userId, sid ?? null, createdAt, expiresAt)
   },
-  get(token) {
-    return stmts.getSession.get(token, Date.now()) ?? null
+  get(tokenHash, now = Date.now()) {
+    return stmts.getSession.get(tokenHash, now) ?? null
   },
-  delete(token) {
-    stmts.deleteSession.run(token)
+  delete(tokenHash) {
+    stmts.deleteSession.run(tokenHash)
   },
-  pruneExpired() {
-    stmts.deleteExpiredSessions.run(Date.now())
+  deleteForUser(userId) {
+    return stmts.deleteSessionsForUser.run(userId).changes
+  },
+  pruneExpired(now = Date.now()) {
+    stmts.deleteExpiredSessions.run(now)
+  },
+}
+
+export const integrity = {
+  countOwnerless() {
+    return stmts.countOwnerless.get().n
   },
 }
