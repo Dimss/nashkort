@@ -46,20 +46,17 @@
   .count { font-weight: 400; color: var(--muted); font-size: 13px; }
   .hidden { display: none !important; }
 
-  /* classes replacing the former inline style attributes */
   .align-end { align-self: end; }
   .scroll-x { overflow-x: auto; }
   .st.missed { color: var(--muted); }
   .nav-link { color: var(--text); font-size: 14px; text-decoration: underline; }
   form.inline { display: inline; margin: 0; }
 
-  /* account (waiting / disabled) and sign-in pages */
   body.state-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
   body.state-page main { max-width: 420px; margin: 0; padding: 0; width: 100%; }
   .state-page .card p { margin: 8px 0; }
   .state-page .actions { justify-content: space-between; }
 
-  /* admin page */
   .admin-table td.actions-cell { white-space: nowrap; }
   .admin-table button { padding: 5px 10px; font-size: 13px; margin-right: 6px; }
   .state-badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--border); color: var(--muted); }

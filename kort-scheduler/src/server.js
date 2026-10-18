@@ -19,11 +19,8 @@ const MAX_MESSAGE_LENGTH = 4096
 const LOGIN_PATH = '/auth/login'
 const LOGOUT_PATH = '/auth/logout'
 const LANGS = new Set(['ru', 'en'])
-const STATES = new Set(['pending', 'approved', 'disabled'])
 const CSP = "default-src 'self'; frame-ancestors 'none'; img-src 'self' data:"
 const ACCOUNT_PAGE = fs.readFileSync(path.join(PUBLIC_DIR, 'account.html'), 'utf8')
-
-// ---- small HTML pages rendered inline (the real pages come in a later unit) ----
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
@@ -67,12 +64,10 @@ function sendConfirmEmailPage(res, lang) {
 }
 
 function sendStatePage(res, state) {
-  // only an allowlisted token is injected, never anything about the person
-  const token = state === 'disabled' ? 'disabled' : 'pending'
+  // Only this allowlisted token is injected, never anything about the person.
+  const token = state === 'pending' ? 'pending' : 'disabled'
   res.status(200).type('html').send(ACCOUNT_PAGE.replace('data-state=""', `data-state="${token}"`))
 }
-
-// ---- helpers ----------------------------------------------------------------
 
 function pickLang(req) {
   const q = req.query?.lang
@@ -90,14 +85,14 @@ function sameOrigin(req) {
   return site === undefined || site === 'same-origin' || site === 'none'
 }
 
-// Logs enough to diagnose without ever printing tokens, claims or configuration.
+// Never prints tokens, claims or configuration.
 function logAuthFailure(stage, err) {
   const parts = [err?.name, err?.code, err?.message].filter(Boolean)
   console.error(`[auth] ${stage} failed: ${parts.join(' ') || 'unknown error'}`)
 }
 
-// KTD2 lookup order inside one transaction: by subject; else adopt a subject-less
-// row by email; else insert pending. A different subject for a taken email is refused.
+// By subject; else adopt a subject-less row by email; else insert pending.
+// A different subject for a taken email is refused.
 function resolveAccount(sub, email) {
   return transaction(() => {
     let user = users.findBySub(sub) ?? users.adoptByEmail(email, sub)
@@ -116,6 +111,7 @@ function isAdmin(session) {
 
 export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts } = {}) {
   sessions.pruneExpired()
+  setInterval(() => sessions.pruneExpired(), 60 * 60 * 1000).unref()
 
   const auth0 = config.auth0
   const provider = oidc ?? createOidc({
@@ -137,8 +133,6 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     if (!sameOrigin(req)) return res.status(403).json({ error: 'Cross-site request refused.' })
     next()
   })
-
-  // ---- sign-in -------------------------------------------------------------
 
   app.get(LOGIN_PATH, async (req, res) => {
     const lang = pickLang(req)
@@ -207,13 +201,11 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     res.redirect(303, url)
   })
 
-  // ---- pages ----------------------------------------------------------------
-
   app.get(['/', '/index.html'], (req, res) => {
     const session = readSession(req)
     if (!session) return res.redirect(302, LOGIN_PATH)
     if (session.state === 'approved') return res.sendFile(path.join(PUBLIC_DIR, 'index.html'))
-    sendStatePage(res, STATES.has(session.state) ? session.state : 'disabled')
+    sendStatePage(res, session.state)
   })
   app.get(['/admin', '/admin.html'], (req, res) => {
     const session = readSession(req)
@@ -221,11 +213,8 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     if (!isAdmin(session)) return res.redirect(302, '/')
     res.sendFile(path.join(PUBLIC_DIR, 'admin.html'))
   })
-  // the state page is only ever served with its token injected by the route above
   app.get('/account.html', (_req, res) => res.redirect(302, '/'))
   app.use(express.static(PUBLIC_DIR, { index: false }))
-
-  // ---- API gate: 401 without a session, 403 with the state unless approved ----
 
   app.use('/api', (req, res, next) => {
     const session = readSession(req)
@@ -242,8 +231,7 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     res.json({ email: req.user.email, state: req.user.state, isAdmin: isAdmin(req.user) })
   })
 
-  // ---- admin: the only routes that take an account id --------------------------
-
+  // The only routes that take an account id.
   app.use('/api/admin', (req, res, next) => {
     if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin access required.' })
     next()
@@ -253,14 +241,14 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     res.json(accounts.list())
   })
 
-  const ACTIONS = { approve: 'approve', reject: 'reject', disable: 'disable', enable: 'enable' }
-  app.post('/api/admin/users/:id/:action', async (req, res, next) => {
-    const action = ACTIONS[req.params.action]
-    if (!action) return res.status(404).json({ error: 'Unknown action.' })
+  const ACTIONS = new Set(['approve', 'reject', 'disable', 'enable'])
+  app.post('/api/admin/users/:id/:action', (req, res, next) => {
+    const action = req.params.action
+    if (!ACTIONS.has(action)) return res.status(404).json({ error: 'Unknown action.' })
     const id = Number(req.params.id)
     if (!Number.isInteger(id) || id <= 0) return res.status(404).json({ error: 'Account not found.' })
     try {
-      const row = await accounts[action](id, req.user.user_id)
+      const row = accounts[action](id, req.user.user_id)
       if (!row) return res.status(404).json({ error: 'Account not found.' })
       res.json(row)
     } catch (err) {

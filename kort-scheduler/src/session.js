@@ -5,9 +5,7 @@ import { sessions } from './db.js'
 export const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000 // absolute, 30 days
 export const SIGN_IN_MAX_AGE_MS = 10 * 60 * 1000 // the transient sign-in cookie
 
-// Cookie names and flags follow the base URL scheme: __Host- and Secure under
-// https; a plain name under a local http base URL. Read per call so a changed
-// BASE_URL between test runs is honoured.
+// __Host- cookies require Secure, so both follow the base URL scheme.
 function secure() {
   return config.baseUrl.startsWith('https://')
 }

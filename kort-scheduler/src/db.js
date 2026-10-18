@@ -1,5 +1,5 @@
 import { config, normalizeEmail } from './config.js'
-import { openDatabase } from './migrations.js'
+import { openDatabase, runInTransaction, UPSERT_ADMIN_SQL } from './migrations.js'
 
 export const database = openDatabase(config.dbPath, { adminEmail: config.adminEmail || null, backupPath: config.backupPath })
 const db = database
@@ -7,18 +7,7 @@ const db = database
 // Any row stuck in 'sending' from a previous crash goes back to pending.
 db.prepare(`UPDATE scheduled_messages SET status = 'pending' WHERE status = 'sending'`).run()
 
-// Runs fn inside one BEGIN IMMEDIATE transaction. Synchronous only: never await inside.
-export function transaction(fn) {
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    const result = fn()
-    db.exec('COMMIT')
-    return result
-  } catch (err) {
-    db.exec('ROLLBACK')
-    throw err
-  }
-}
+export const transaction = (fn) => runInTransaction(db, fn)
 
 const stmts = {
   insert: db.prepare(`
@@ -60,7 +49,7 @@ const stmts = {
   adoptByEmail: db.prepare(`UPDATE users SET auth0_sub = ? WHERE email = ? AND auth0_sub IS NULL`),
   touchSignIn: db.prepare(`UPDATE users SET last_sign_in_at = ?, email = ? WHERE id = ?`),
   setState: db.prepare(`UPDATE users SET state = ? WHERE id = ?`),
-  upsertAdmin: db.prepare(`INSERT INTO users (email, state, created_at) VALUES (?, 'approved', ?) ON CONFLICT(email) DO UPDATE SET state = 'approved'`),
+  upsertAdmin: db.prepare(UPSERT_ADMIN_SQL),
   listUsers: db.prepare(`
     SELECT id, email, state, created_at, last_sign_in_at FROM users
     ORDER BY CASE state WHEN 'pending' THEN 0 ELSE 1 END, created_at ASC, id ASC
@@ -97,7 +86,6 @@ export const messages = {
   get(id, ownerId) {
     return stmts.getOwned.get(id, requireOwner(ownerId))
   },
-  // Scheduler-internal lookup by id, not scoped to a caller.
   getById(id) {
     return stmts.getById.get(id)
   },
@@ -148,7 +136,6 @@ export const users = {
     const r = stmts.insertPending.run(normalizeEmail(email), sub, now, now)
     return stmts.userById.get(Number(r.lastInsertRowid))
   },
-  // Attaches a subject to a row that has none yet (legacy or bootstrapped rows). Undefined when no such row.
   adoptByEmail(email, sub) {
     if (stmts.adoptByEmail.run(sub, normalizeEmail(email)).changes !== 1) return undefined
     return stmts.userBySub.get(sub)

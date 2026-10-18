@@ -1,12 +1,11 @@
 import fs from 'node:fs'
-import path from 'node:path'
 import { config } from './config.js'
 import { users, integrity } from './db.js'
+import { hasCredentials } from './whatsapp.js'
 
-// Per-boot repair that cannot live in the schema transaction: make sure the
-// configured admin exists and is approved, move the single legacy credential
-// folder into the admin's own folder exactly once, and report (never repair)
-// messages without an owner.
+// Per-boot repair outside the schema transaction: the configured admin exists
+// and is approved, the single legacy credential folder moves into the admin's
+// folder once, and ownerless messages are reported, never reassigned.
 export function bootstrap() {
   const adminEmail = config.adminEmail
   if (!adminEmail) throw new Error('ADMIN_EMAIL is not set')
@@ -14,7 +13,7 @@ export function bootstrap() {
 
   let movedLegacyAuth = false
   const legacy = config.legacyAuthDir
-  if (fs.existsSync(path.join(legacy, 'creds.json'))) {
+  if (hasCredentials(legacy)) {
     const target = config.authDirFor(admin.id)
     if (fs.existsSync(target)) {
       console.error(`[bootstrap] both ${legacy} and ${target} exist; leaving both in place`)

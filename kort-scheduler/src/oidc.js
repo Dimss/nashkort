@@ -1,8 +1,6 @@
-// Thin wrapper over openid-client for the Auth0 code flow with PKCE.
-//
-// Discovery is lazy (first auth request), retried a few times and cached, so
-// start-up never contacts the tenant. Every URL handed back derives from the
-// base URL passed in, never from a request header.
+// Auth0 code flow with PKCE over openid-client. Discovery is lazy and cached so
+// start-up never contacts the tenant; every URL derives from the configured base URL.
+import { setTimeout as sleep } from 'node:timers/promises'
 import * as client from 'openid-client'
 
 // The fixed reason an Auth0 post-login Action sets when it denies an unverified email.
@@ -14,7 +12,6 @@ export const CALLBACK_PATH = '/auth/callback'
 
 const DISCOVERY_ATTEMPTS = 3
 const DISCOVERY_RETRY_MS = [300, 1000]
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const looksLikeJwt = (value) => typeof value === 'string' && /^[\w-]+\.[\w-]+\.[\w-]+$/.test(value)
 
 export function createOidc({ issuer, clientId, clientSecret, baseUrl, fetch: fetchImpl } = {}) {
@@ -61,7 +58,6 @@ export function createOidc({ issuer, clientId, clientSecret, baseUrl, fetch: fet
     redirectUri,
     postLogoutRedirectUri,
 
-    // Builds the authorization redirect; the caller stores state, nonce and verifier in its cookie.
     async beginLogin({ lang = 'ru' } = {}) {
       const cfg = await getConfig()
       const verifier = client.randomPKCECodeVerifier()
@@ -80,7 +76,6 @@ export function createOidc({ issuer, clientId, clientSecret, baseUrl, fetch: fet
       return { url: url.href, state, nonce, verifier }
     },
 
-    // Exchanges the code in the callback URL and returns the ID token claims plus the raw ID token.
     async completeLogin(currentUrl, { state, nonce, verifier }) {
       const cfg = await getConfig()
       const tokens = await client.authorizationCodeGrant(cfg, new URL(currentUrl), {

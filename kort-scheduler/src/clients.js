@@ -1,16 +1,11 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import { EventEmitter } from 'node:events'
 import pino from 'pino'
 import { config } from './config.js'
-import { WhatsAppClient } from './whatsapp.js'
+import { WhatsAppClient, hasCredentials } from './whatsapp.js'
 
 const IDLE_STATUSES = new Set(['connecting', 'qr'])
 
-/**
- * One WhatsApp client per user. Clients are looked up only by the integer user
- * id the session gate attaches; nothing here accepts a request parameter.
- */
+/** One WhatsApp client per user, keyed by the integer user id the session gate attaches. */
 export function createRegistry({ makeClient, idleMs = 5 * 60_000, staggerMs = 2000, sweepMs = 60_000 } = {}) {
   const clients = new Map()
   const lastPollAt = new Map()
@@ -29,7 +24,6 @@ export function createRegistry({ makeClient, idleMs = 5 * 60_000, staggerMs = 20
       return clients.get(requireId(userId))
     },
 
-    // Create and start the user's client if none is running; records the poll time.
     ensure(userId, now = Date.now()) {
       requireId(userId)
       lastPollAt.set(userId, now)
@@ -48,7 +42,6 @@ export function createRegistry({ makeClient, idleMs = 5 * 60_000, staggerMs = 20
       return client
     },
 
-    // The user's own view: a running client's state, or idle with whether credentials exist.
     snapshot(userId, now = Date.now()) {
       requireId(userId)
       lastPollAt.set(userId, now)
@@ -60,7 +53,7 @@ export function createRegistry({ makeClient, idleMs = 5 * 60_000, staggerMs = 20
         qr: null,
         me: null,
         lastError: null,
-        linked: fs.existsSync(path.join(config.authDirFor(userId), 'creds.json')),
+        linked: hasCredentials(config.authDirFor(userId)),
       }
     },
 
@@ -68,6 +61,7 @@ export function createRegistry({ makeClient, idleMs = 5 * 60_000, staggerMs = 20
       const client = clients.get(requireId(userId))
       if (!client) return false
       clients.delete(userId)
+      lastPollAt.delete(userId)
       await client.stop()
       return true
     },
@@ -77,7 +71,6 @@ export function createRegistry({ makeClient, idleMs = 5 * 60_000, staggerMs = 20
       await Promise.all(all.map((id) => registry.stop(id)))
     },
 
-    // Stop clients that have sat in QR or connecting with nobody watching.
     sweepIdle(now = Date.now()) {
       for (const [userId, client] of clients) {
         const polled = lastPollAt.get(userId) ?? 0
@@ -88,13 +81,12 @@ export function createRegistry({ makeClient, idleMs = 5 * 60_000, staggerMs = 20
       }
     },
 
-    // At boot, start clients for the given users that have saved credentials, a couple of seconds apart.
     async bootAll(userIds, now = Date.now()) {
       let delay = 0
       const started = []
       for (const userId of userIds) {
         requireId(userId)
-        if (!fs.existsSync(path.join(config.authDirFor(userId), 'creds.json'))) continue
+        if (!hasCredentials(config.authDirFor(userId))) continue
         started.push(new Promise((resolve) => {
           const t = setTimeout(() => { registry.ensure(userId, now); resolve() }, delay)
           t.unref?.()

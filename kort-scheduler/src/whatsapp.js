@@ -10,9 +10,13 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys'
 import QRCode from 'qrcode'
 
-// The WhatsApp Web version is fetched over the network; do it once per process
-// and share it with every client instead of once per socket start.
 let versionPromise = null
+// Saved credentials for one user's link live in this file inside their folder.
+export function hasCredentials(authDir) {
+  return fs.existsSync(path.join(authDir, 'creds.json'))
+}
+
+// Fetched over the network, so once per process and shared by every client.
 export function resolveWaVersion(logger) {
   if (!versionPromise) {
     versionPromise = fetchLatestBaileysVersion()
@@ -25,11 +29,7 @@ export function resolveWaVersion(logger) {
   return versionPromise
 }
 
-/**
- * One WhatsApp connection for one user: login via QR, auto-reconnect, group
- * listing and text sending. Credentials live in `authDir` and nothing else
- * ever reads or deletes that folder.
- */
+/** One WhatsApp connection for one user: login via QR, auto-reconnect, group listing and text sending. */
 export class WhatsAppClient extends EventEmitter {
   sock = null
   status = 'disconnected' // disconnected | connecting | qr | connected | logged_out
@@ -56,9 +56,8 @@ export class WhatsAppClient extends EventEmitter {
     return this.status === 'connected' && !!this.sock
   }
 
-  // Credentials saved on disk, whether or not a socket is open right now.
   get linked() {
-    return fs.existsSync(path.join(this.authDir, 'creds.json'))
+    return hasCredentials(this.authDir)
   }
 
   async start() {
@@ -86,7 +85,6 @@ export class WhatsAppClient extends EventEmitter {
       cachedGroupMetadata: async (jid) => this.#groupMeta.get(jid),
     })
     if (generation !== this.#generation) {
-      // stop() ran while we were awaiting; this socket must not live on
       try { sock.end?.(undefined) } catch {}
       return
     }
@@ -95,7 +93,7 @@ export class WhatsAppClient extends EventEmitter {
     sock.ev.on('creds.update', saveCreds)
 
     sock.ev.on('connection.update', async (update) => {
-      if (this.sock !== sock) return // event from a socket that was already replaced or stopped
+      if (this.sock !== sock) return
       const { connection, lastDisconnect, qr } = update
 
       if (qr) {
@@ -127,7 +125,7 @@ export class WhatsAppClient extends EventEmitter {
           this.logger?.warn?.('logged out from WhatsApp; clearing credentials')
           this.#setStatus('logged_out')
           fs.rmSync(this.authDir, { recursive: true, force: true })
-          if (!this.#stopped) this.#scheduleReconnect(1000) // offer a fresh QR
+          if (!this.#stopped) this.#scheduleReconnect(1000)
         } else if (!this.#stopped) {
           this.logger?.warn?.({ statusCode, err: this.lastError }, 'connection closed; reconnecting')
           this.#setStatus('disconnected')
@@ -138,7 +136,6 @@ export class WhatsAppClient extends EventEmitter {
       }
     })
 
-    // Keep the group metadata cache fresh so sends to groups avoid extra round-trips.
     sock.ev.on('groups.update', async (events) => {
       for (const ev of events) {
         if (!ev.id) continue
@@ -196,7 +193,6 @@ export class WhatsAppClient extends EventEmitter {
     return this.sock.sendMessage(jid, { text })
   }
 
-  /** Unlink the phone: tells WhatsApp, deletes this user's credentials, then offers a fresh QR. */
   async logout() {
     this.#stopped = true
     this.#generation++
@@ -214,7 +210,6 @@ export class WhatsAppClient extends EventEmitter {
     await this.start()
   }
 
-  /** Pause: close the socket, keep the credentials, suppress reconnects. */
   async stop() {
     this.#stopped = true
     this.#generation++

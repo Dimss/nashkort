@@ -8,10 +8,11 @@ export function normalizeEmail(value) {
   return String(value ?? '').trim().toLowerCase()
 }
 
+const WA_ROOT = path.join(DATA_DIR, 'wa')
+
 const REQUIRED_ENV = ['ADMIN_EMAIL', 'BASE_URL', 'AUTH0_DOMAIN', 'AUTH0_CLIENT_ID', 'AUTH0_CLIENT_SECRET']
 
-// Returns the names of required variables that are missing or blank. Never
-// returns or logs a value.
+// Names of required variables that are missing or blank; never a value.
 export function validateConfig(env = process.env) {
   return REQUIRED_ENV.filter((name) => !env[name] || !String(env[name]).trim())
 }
@@ -21,12 +22,12 @@ export const config = {
   dataDir: DATA_DIR,
   dbPath: path.join(DATA_DIR, 'scheduler.db'),
   backupPath: path.join(DATA_DIR, 'scheduler.pre-auth0.db'),
-  // Credentials of the single pre-multi-user link; moved to the admin's folder at first start.
+  // The single pre-multi-user link; moved to the admin's folder at first start.
   legacyAuthDir: path.join(DATA_DIR, 'auth'),
-  waRoot: path.join(DATA_DIR, 'wa'),
+  waRoot: WA_ROOT,
   authDirFor(userId) {
     if (!Number.isInteger(userId) || userId <= 0) throw new TypeError('authDirFor needs a positive integer user id')
-    return path.join(DATA_DIR, 'wa', String(userId))
+    return path.join(WA_ROOT, String(userId))
   },
   waLogLevel: process.env.WA_LOG_LEVEL || 'warn',
   // How often the scheduler checks for due messages
@@ -36,7 +37,7 @@ export const config = {
   retryDelayMs: 30_000,
   // Group list cache lifetime
   groupCacheMs: 60_000,
-  // Read lazily so start-up validation runs first and tests can change them between runs.
+  // Read lazily so start-up validation runs before anything needs them.
   get adminEmail() { return normalizeEmail(process.env.ADMIN_EMAIL) },
   get baseUrl() { return String(process.env.BASE_URL || '').replace(/\/+$/, '') },
   get auth0() {
