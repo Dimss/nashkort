@@ -1,72 +1,231 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
-import { authenticate, login, logout } from './auth.js'
-import { messages, sessions } from './db.js'
+import { config, normalizeEmail } from './config.js'
+import { messages, sessions, users, transaction } from './db.js'
 import { REPEAT_RULES } from './recurrence.js'
 import { clients } from './clients.js'
+import { createOidc, EMAIL_NOT_VERIFIED, SUBJECT_PREFIX, CALLBACK_PATH } from './oidc.js'
+import {
+  getCookie, readSession, createSession, setSessionCookie, clearSessionCookie, destroySession,
+  setSignInCookie, readSignInCookie, clearSignInCookie,
+} from './session.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const PUBLIC_DIR = path.join(__dirname, '..', 'public')
 const MAX_MESSAGE_LENGTH = 4096
-const SESSION_COOKIE = 'session'
-const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000 // 30 days, matches auth.js
+const LOGIN_PATH = '/auth/login'
+const LOGOUT_PATH = '/auth/logout'
+const LANGS = new Set(['ru', 'en'])
+const STATES = new Set(['pending', 'approved', 'disabled'])
 
-function getCookie(req, name) {
-  const header = req.headers.cookie
-  if (!header) return null
-  for (const part of header.split(';')) {
-    const idx = part.indexOf('=')
-    if (idx === -1) continue
-    if (part.slice(0, idx).trim() === name) return decodeURIComponent(part.slice(idx + 1).trim())
-  }
-  return null
+// ---- small HTML pages rendered inline (the real pages come in a later unit) ----
+
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+function page({ lang, title, ru, en, state, signInAgain }) {
+  const safeLang = LANGS.has(lang) ? lang : 'ru'
+  const link = signInAgain
+    ? `<p><a href="${LOGIN_PATH}?lang=${safeLang}">Войти снова / Sign in again</a></p>`
+    : ''
+  return `<!DOCTYPE html>
+<html lang="${safeLang}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title>
+<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;line-height:1.5}</style></head>
+<body${state ? ` data-state="${escapeHtml(state)}"` : ''}>
+<p lang="ru">${escapeHtml(ru)}</p>
+<p lang="en">${escapeHtml(en)}</p>
+${link}
+</body>
+</html>`
 }
 
-function currentSession(req) {
-  return authenticate(getCookie(req, SESSION_COOKIE))
+function sendGenericErrorPage(res, lang) {
+  res.status(400).type('html').send(page({
+    lang,
+    title: 'Ошибка входа / Sign-in error',
+    ru: 'Не удалось выполнить вход. Попробуйте ещё раз.',
+    en: 'Sign-in did not complete. Please try again.',
+    signInAgain: true,
+  }))
 }
 
-export function createApp() {
+function sendConfirmEmailPage(res, lang) {
+  res.status(403).type('html').send(page({
+    lang,
+    title: 'Подтвердите почту / Confirm your email',
+    ru: 'Подтвердите адрес электронной почты по ссылке из письма, затем войдите снова.',
+    en: 'Please confirm your email address using the link we sent you, then sign in again.',
+    signInAgain: true,
+  }))
+}
+
+function sendStatePage(res, state, lang) {
+  const text = state === 'disabled'
+    ? { ru: 'Ваш аккаунт отключён.', en: 'Your account is disabled.' }
+    : { ru: 'Ваш аккаунт ожидает подтверждения администратором.', en: 'Your account is pending approval.' }
+  res.status(200).type('html').send(page({ lang, title: `Court Scheduler — ${state}`, ...text, state }))
+}
+
+// ---- helpers ----------------------------------------------------------------
+
+function pickLang(req) {
+  const q = req.query?.lang
+  if (typeof q === 'string' && LANGS.has(q)) return q
+  const c = getCookie(req, 'lang')
+  if (c && LANGS.has(c)) return c
+  return 'ru'
+}
+
+// State-changing requests must come from the app's own origin.
+function sameOrigin(req) {
+  const origin = req.headers.origin
+  if (origin !== undefined) return origin === config.baseUrl
+  const site = req.headers['sec-fetch-site']
+  return site === undefined || site === 'same-origin' || site === 'none'
+}
+
+// Logs enough to diagnose without ever printing tokens, claims or configuration.
+function logAuthFailure(stage, err) {
+  const parts = [err?.name, err?.code, err?.message].filter(Boolean)
+  console.error(`[auth] ${stage} failed: ${parts.join(' ') || 'unknown error'}`)
+}
+
+// KTD2 lookup order inside one transaction: by subject; else adopt a subject-less
+// row by email; else insert pending. A different subject for a taken email is refused.
+function resolveAccount(sub, email) {
+  return transaction(() => {
+    let user = users.findBySub(sub) ?? users.adoptByEmail(email, sub)
+    if (!user) {
+      if (users.findByEmail(email)) return null
+      user = users.insertPending({ email, sub })
+    }
+    users.touchSignIn(user.id, email)
+    return users.get(user.id)
+  })
+}
+
+function isAdmin(session) {
+  return session.state === 'approved' && normalizeEmail(session.email) === config.adminEmail
+}
+
+export function createApp({ fetch: fetchImpl, oidc } = {}) {
   sessions.pruneExpired()
 
+  const auth0 = config.auth0
+  const provider = oidc ?? createOidc({
+    issuer: `https://${auth0.domain}`,
+    clientId: auth0.clientId,
+    clientSecret: auth0.clientSecret,
+    baseUrl: config.baseUrl,
+    fetch: fetchImpl,
+  })
+
   const app = express()
+  app.set('trust proxy', 1)
+  app.disable('x-powered-by')
   app.use(express.json({ limit: '64kb' }))
 
-  // Gate the app shell itself: unauthenticated visitors get the login page.
-  app.get(['/', '/index.html'], (req, res, next) => {
-    if (!currentSession(req)) return res.redirect('/login.html')
+  app.use((req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next()
+    if (!sameOrigin(req)) return res.status(403).json({ error: 'Cross-site request refused.' })
     next()
   })
-  app.use(express.static(path.join(__dirname, '..', 'public')))
 
-  app.post('/api/login', (req, res) => {
-    const { email, password } = req.body ?? {}
-    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
-      return res.status(400).json({ error: 'Email and password are required.' })
+  // ---- sign-in -------------------------------------------------------------
+
+  app.get(LOGIN_PATH, async (req, res) => {
+    const lang = pickLang(req)
+    try {
+      const { url, state, nonce, verifier } = await provider.beginLogin({ lang })
+      setSignInCookie(res, { state, nonce, verifier, lang })
+      res.redirect(302, url)
+    } catch (err) {
+      logAuthFailure('login', err)
+      clearSignInCookie(res)
+      sendGenericErrorPage(res, lang)
     }
-    const token = login(email.trim().toLowerCase(), password)
-    if (!token) return res.status(401).json({ error: 'Invalid email or password.' })
-    res.cookie(SESSION_COOKIE, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: SESSION_MAX_AGE_MS,
-      path: '/',
-    })
-    res.json({ ok: true })
   })
 
-  app.post('/api/auth/logout', (req, res) => {
-    logout(getCookie(req, SESSION_COOKIE))
-    res.clearCookie(SESSION_COOKIE, { path: '/' })
-    res.json({ ok: true })
+  app.get(CALLBACK_PATH, async (req, res) => {
+    const pending = readSignInCookie(req)
+    clearSignInCookie(res)
+    const lang = LANGS.has(pending?.lang) ? pending.lang : pickLang(req)
+
+    // The state cookie is checked before anything else, on both branches.
+    const state = req.query.state
+    if (!pending || typeof state !== 'string' || state !== pending.state) return sendGenericErrorPage(res, lang)
+
+    if (req.query.error !== undefined) {
+      if (req.query.error_description === EMAIL_NOT_VERIFIED) return sendConfirmEmailPage(res, lang)
+      return sendGenericErrorPage(res, lang)
+    }
+
+    let claims
+    try {
+      ;({ claims } = await provider.completeLogin(new URL(req.originalUrl, config.baseUrl), pending))
+    } catch (err) {
+      logAuthFailure('callback', err)
+      return sendGenericErrorPage(res, lang)
+    }
+
+    const sub = claims.sub
+    const email = normalizeEmail(typeof claims.email === 'string' ? claims.email : '')
+    if (typeof sub !== 'string' || !sub.startsWith(SUBJECT_PREFIX) || !email) return sendGenericErrorPage(res, lang)
+    if (claims.email_verified !== true) return sendConfirmEmailPage(res, lang)
+
+    let user
+    try {
+      user = resolveAccount(sub, email)
+    } catch (err) {
+      logAuthFailure('account lookup', err)
+      return sendGenericErrorPage(res, lang)
+    }
+    if (!user) return sendGenericErrorPage(res, lang)
+
+    const hint = typeof claims.sid === 'string' ? claims.sid : null
+    setSessionCookie(res, createSession(user.id, hint))
+    res.redirect(302, '/')
   })
 
-  // Everything else under /api requires a valid session.
+  app.post(LOGOUT_PATH, async (req, res) => {
+    const session = destroySession(req)
+    clearSessionCookie(res)
+    let url
+    try {
+      url = await provider.logoutUrl(session?.sid ?? null)
+    } catch (err) {
+      logAuthFailure('logout', err)
+      url = '/'
+    }
+    res.redirect(303, url)
+  })
+
+  // ---- pages ----------------------------------------------------------------
+
+  app.get(['/', '/index.html'], (req, res) => {
+    const session = readSession(req)
+    if (!session) return res.redirect(302, LOGIN_PATH)
+    if (session.state === 'approved') return res.sendFile(path.join(PUBLIC_DIR, 'index.html'))
+    sendStatePage(res, STATES.has(session.state) ? session.state : 'disabled', pickLang(req))
+  })
+  app.use(express.static(PUBLIC_DIR, { index: false }))
+
+  // ---- API gate: 401 without a session, 403 with the state unless approved ----
+
   app.use('/api', (req, res, next) => {
-    const session = currentSession(req)
+    const session = readSession(req)
     if (!session) return res.status(401).json({ error: 'Authentication required.' })
     req.user = session
+    if (req.path === '/me') return next()
+    if (session.state !== 'approved') {
+      return res.status(403).json({ error: `Your account is ${session.state}.`, state: session.state })
+    }
     next()
+  })
+
+  app.get('/api/me', (req, res) => {
+    res.json({ email: req.user.email, state: req.user.state, isAdmin: isAdmin(req.user) })
   })
 
   app.get('/api/status', (req, res) => {
@@ -139,6 +298,7 @@ export function createApp() {
     res.status(204).end()
   })
 
+  // Unlinks the caller's WhatsApp account (not the app sign-out, which is POST /auth/logout).
   app.post('/api/logout', async (req, res, next) => {
     try {
       const client = clients.ensure(req.user.user_id)
@@ -151,8 +311,12 @@ export function createApp() {
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
+    const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 ? err.status : 500
     console.error(err)
-    res.status(500).json({ error: err?.message ?? 'Internal error' })
+    if (res.headersSent) return
+    // Only errors that carry an explicit 4xx and are meant for clients (body parser) show their text.
+    const message = status < 500 && err?.expose && typeof err.message === 'string' ? err.message : 'Internal error'
+    res.status(status).json({ error: message })
   })
 
   return app
