@@ -21,3 +21,15 @@ export function nextOccurrence(sendAt, repeat, anchorSendAt = sendAt) {
   }
   return null
 }
+
+// Applies nextOccurrence from `sendAt` until the result lands strictly after
+// `now`; used to move a series past occurrences that were missed. Null when
+// the series doesn't repeat.
+export function fastForward(sendAt, repeat, anchorSendAt = sendAt, now = Date.now()) {
+  let t = sendAt
+  do {
+    t = nextOccurrence(t, repeat, anchorSendAt)
+    if (t == null) return null
+  } while (t <= now)
+  return t
+}
