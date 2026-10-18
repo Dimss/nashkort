@@ -1,0 +1,22 @@
+[Unit]
+Description=WhatsApp Scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/court-scheduler
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=DATA_DIR=/home/ubuntu/court-scheduler/data
+ExecStart=/usr/bin/node --no-warnings=ExperimentalWarning src/index.js
+Restart=always
+RestartSec=5
+
+# Hardening (safe defaults for a single-user Node app)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
