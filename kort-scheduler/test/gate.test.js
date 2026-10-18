@@ -169,7 +169,7 @@ test('errors without an explicit status answer { error: "Internal error" }; malf
   assert.equal(typeof body.error, 'string')
 })
 
-test('R16/R17: over HTTP a user cannot read, cancel or delete another user\'s message, and validation answers 400', async () => {
+test('AE5 (R16, R17): over HTTP a user cannot read, cancel or delete another user\'s message, and validation answers 400', async () => {
   const post = { method: 'POST', headers: { origin: 'http://app.local' } }
   const a = (await signIn(srv.origin, issuer, verified('auth0|owner-a', 'owner-a@example.com'))).session
   const b = (await signIn(srv.origin, issuer, verified('auth0|owner-b', 'owner-b@example.com'))).session
