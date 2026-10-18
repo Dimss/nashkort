@@ -6,6 +6,7 @@ import { messages, sessions, users, transaction } from './db.js'
 import { REPEAT_RULES } from './recurrence.js'
 import { clients } from './clients.js'
 import { createOidc, EMAIL_NOT_VERIFIED, SUBJECT_PREFIX, CALLBACK_PATH } from './oidc.js'
+import { accounts as defaultAccounts } from './accounts.js'
 import {
   getCookie, readSession, createSession, setSessionCookie, clearSessionCookie, destroySession,
   setSignInCookie, readSignInCookie, clearSignInCookie,
@@ -109,7 +110,7 @@ function isAdmin(session) {
   return session.state === 'approved' && normalizeEmail(session.email) === config.adminEmail
 }
 
-export function createApp({ fetch: fetchImpl, oidc } = {}) {
+export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts } = {}) {
   sessions.pruneExpired()
 
   const auth0 = config.auth0
@@ -226,6 +227,33 @@ export function createApp({ fetch: fetchImpl, oidc } = {}) {
 
   app.get('/api/me', (req, res) => {
     res.json({ email: req.user.email, state: req.user.state, isAdmin: isAdmin(req.user) })
+  })
+
+  // ---- admin: the only routes that take an account id --------------------------
+
+  app.use('/api/admin', (req, res, next) => {
+    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin access required.' })
+    next()
+  })
+
+  app.get('/api/admin/users', (_req, res) => {
+    res.json(accounts.list())
+  })
+
+  const ACTIONS = { approve: 'approve', reject: 'reject', disable: 'disable', enable: 'enable' }
+  app.post('/api/admin/users/:id/:action', async (req, res, next) => {
+    const action = ACTIONS[req.params.action]
+    if (!action) return res.status(404).json({ error: 'Unknown action.' })
+    const id = Number(req.params.id)
+    if (!Number.isInteger(id) || id <= 0) return res.status(404).json({ error: 'Account not found.' })
+    try {
+      const row = await accounts[action](id, req.user.user_id)
+      if (!row) return res.status(404).json({ error: 'Account not found.' })
+      res.json(row)
+    } catch (err) {
+      if (err?.status === 409) return res.status(409).json({ error: err.message })
+      next(err)
+    }
   })
 
   app.get('/api/status', (req, res) => {
