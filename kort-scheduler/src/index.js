@@ -16,7 +16,8 @@ const { scheduler } = await import('./scheduler.js')
 bootstrap()
 
 const app = createApp()
-const server = app.listen(config.port, () => {
+// Loopback only: the reverse proxy on the same host is the public face.
+const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`Web UI: http://localhost:${config.port}`)
 })
 

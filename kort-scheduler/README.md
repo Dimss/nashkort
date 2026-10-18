@@ -1,159 +1,196 @@
 # WhatsApp Group Message Scheduler
 
-Schedule text messages to WhatsApp groups from a small web UI. Built on
-[Baileys](https://baileys.wiki/) (WhatsApp Web multi-device protocol), Express and SQLite.
+Schedule text messages to WhatsApp groups from a small web UI, one linked phone per user.
+Built on [Baileys](https://baileys.wiki/) (WhatsApp Web multi-device protocol), Express and SQLite,
+with sign-in through Auth0.
 
 ## Requirements
 
-- Node.js 22.5 or newer (uses the built-in `node:sqlite` module)
-- A phone with WhatsApp to link as a companion device
+- Node.js 24 or newer (uses the built-in `node:sqlite` module)
+- An Auth0 tenant with a Regular Web Application (email and password sign-in)
+- A phone with WhatsApp per user, linked as a companion device
 
-## Run
+## Accounts
+
+People create an account on the Auth0 sign-in page and verify their email. Their first
+sign-in creates a **pending** account that sees only a waiting page. The admin approves it
+from the **Users** page; the person then links their own phone by scanning a QR code and
+sees only their own groups and messages. Nobody, the admin included, can see another
+person's messages or link state.
+
+The admin is the one account whose email equals `ADMIN_EMAIL`. The admin is also an
+ordinary user with their own phone and schedule. From the Users page the admin can:
+
+| Action | Effect |
+| --- | --- |
+| Approve | A pending account gets access on its next request. |
+| Reject | A pending account becomes disabled. |
+| Disable | Every session of the account ends at once, its WhatsApp connection closes (the link is kept) and its queued messages are held. |
+| Enable | Messages whose time passed while disabled are marked **missed** and never sent; recurring series continue from the next future occurrence; the connection comes back. |
+
+Signing out of the app also ends the Auth0 session, so the next sign-in on that browser
+asks for credentials again.
+
+## Run locally
 
 ```bash
 npm install
+cp .env.example .env   # fill in the Auth0 values and ADMIN_EMAIL
+set -a; . ./.env; set +a
 npm start
 ```
 
-Open http://localhost:3000. On first start a QR code is shown; on your phone go to
-**WhatsApp → Settings → Linked devices → Link a device** and scan it. The session is
-saved under `data/auth`, so later restarts reconnect automatically.
+Open http://localhost:3000. The app binds to 127.0.0.1 only. For local use the Auth0
+application must list `http://localhost:3000/auth/callback` as an allowed callback URL
+and `http://localhost:3000/` as an allowed logout URL. Sign in with the account whose
+email is `ADMIN_EMAIL`; you land in the app as the admin.
 
-Then pick a group, type a message, choose a date and time (in your browser's local
-timezone) and click **Schedule**. The server checks every 5 seconds and sends due messages.
+Tests: `npm test` (Node's built-in runner; no network, no Auth0).
 
 ## Configuration
 
-Environment variables (see `.env.example`):
+All variables are read from the environment. The required ones make the process exit
+with a message naming the variable when missing.
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `PORT` | `3000` | Web UI port |
-| `DATA_DIR` | `./data` | Where credentials and the SQLite database live |
-| `WA_LOG_LEVEL` | `warn` | Baileys log level |
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `BASE_URL` | yes | | Public address as the browser sees it, no trailing slash. Cookies are `__Host-` and Secure under https. |
+| `ADMIN_EMAIL` | yes | | Email of the one admin account, compared case-insensitively with the Auth0 email. |
+| `AUTH0_DOMAIN` | yes | | Tenant domain, for example `your-tenant.eu.auth0.com`. |
+| `AUTH0_CLIENT_ID` | yes | | Regular Web Application client id. |
+| `AUTH0_CLIENT_SECRET` | yes | | Its client secret. |
+| `PORT` | no | `3000` | Web UI port on 127.0.0.1. |
+| `DATA_DIR` | no | `./data` | Database and per-user WhatsApp credentials (`wa/<user id>/`). |
+| `WA_LOG_LEVEL` | no | `warn` | Baileys log level. |
+
+### Auth0 tenant checklist
+
+These are requirements, not suggestions; the app refuses subjects that are not from the
+database connection.
+
+- One **database** connection (email and password), no social or other connections.
+- A Regular Web Application with **Authorization Code** as the only grant.
+- Allowed Callback URLs: `<BASE_URL>/auth/callback`. Allowed Logout URLs: `<BASE_URL>/`.
+  Allowed Web Origins: empty.
+- Tenant languages: Russian and English enabled (the app passes `ui_locales`).
+- A post-login Action that denies unverified emails with the reason `email_not_verified`
+  (the app also refuses unverified emails itself). Example:
+
+  ```js
+  exports.onExecutePostLogin = async (event, api) => {
+    if (!event.user.email_verified) api.access.deny('email_not_verified')
+  }
+  ```
+
+- An SMTP provider configured for verification emails (Auth0's built-in sender is for testing only).
+- Password policy at least "Good".
 
 ## Behaviour
 
 - Messages are stored in SQLite (`data/scheduler.db`) and survive restarts.
-- If WhatsApp is disconnected when a message is due, it stays pending and goes out as soon as the connection is back.
+- If a user's phone is disconnected when a message is due, it stays pending and goes out as soon as the connection is back.
 - A failed send is retried up to 5 times, 30 seconds apart, then marked **failed** with the error.
-- Pending messages can be cancelled; sent, failed or cancelled ones can be deleted.
-- **Log out** clears the saved session and shows a fresh QR code.
+- Pending messages can be cancelled; sent, failed, missed or cancelled ones can be deleted.
+- **Log out of WhatsApp** unlinks the user's own phone and shows a fresh QR code.
+- A WhatsApp connection is opened for a user at start-up only if they have saved credentials, otherwise when they open the app; an unlinked connection waiting for a scan is closed after 5 minutes without the page open.
 
 ## API
 
+Every `/api` route needs the session cookie set by sign-in and an approved account
+(`401` without a session, `403` with `{ error, state }` otherwise). State-changing requests
+must come from the app's own origin.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/status` | Connection status and QR code (data URL) when login is needed |
-| GET | `/api/groups?refresh=1` | Groups the linked account is in |
-| GET | `/api/messages` | All scheduled messages |
-| POST | `/api/messages` | `{ groupJid, groupName, message, sendAt, repeat }` (`sendAt` is epoch ms, `repeat` is `none`\|`weekly`\|`monthly`) |
-| POST | `/api/messages/:id/cancel` | Cancel a pending message |
-| DELETE | `/api/messages/:id` | Delete a non-pending message |
-| POST | `/api/logout` | Unlink the device |
-
-## Notes
-
-- The web UI has no authentication. Run it on localhost or behind a reverse proxy with auth.
-- Baileys is an unofficial client. Keep the process running (e.g. with `pm2` or a systemd unit) so scheduled messages go out, and avoid bulk messaging, which can get the number banned.
+| GET | `/auth/login` | Redirects to Auth0 (`?lang=ru|en`) |
+| GET | `/auth/callback` | Auth0 returns here |
+| POST | `/auth/logout` | Ends the app session and the Auth0 session |
+| GET | `/api/me` | `{ email, state, isAdmin }` for any signed-in account |
+| GET | `/api/status` | The caller's connection status and QR code (data URL) when a scan is needed |
+| GET | `/api/groups?refresh=1` | Groups the caller's phone is in |
+| GET | `/api/messages` | The caller's scheduled messages |
+| POST | `/api/messages` | `{ groupJid, groupName, message, sendAt, repeat }` (`sendAt` epoch ms, `repeat` `none`\|`weekly`\|`monthly`) |
+| POST | `/api/messages/:id/cancel` | Cancel one of the caller's pending messages |
+| DELETE | `/api/messages/:id` | Delete one of the caller's non-pending messages |
+| POST | `/api/logout` | Unlink the caller's phone |
+| GET | `/api/admin/users` | Admin: all accounts |
+| POST | `/api/admin/users/:id/{approve,reject,disable,enable}` | Admin actions |
 
 ## Deploying
 
-This app is a single always-on Node process: it holds a persistent WhatsApp socket
-and polls for due messages in-process, and it keeps its database and WhatsApp
-session as local files under `DATA_DIR`. That rules out serverless platforms
-(Vercel, Netlify, etc.) — they tear the process down between requests and wipe
-the filesystem, which would drop the WhatsApp connection and lose scheduled
-messages. It needs a host that keeps one process running continuously with a
-persistent disk. Two options below: Fly.io (small ongoing cost, easiest setup)
-and an Oracle Cloud Always Free VM (genuinely free forever, more manual setup).
+This is one always-on Node process with a persistent local disk, so it needs a real
+host (not serverless). Production runs on an Oracle Cloud Always Free VM behind Caddy,
+which terminates HTTPS on a subdomain you own and proxies to the app on loopback. The
+`Dockerfile` and `fly.toml` are not the production path and predate the Auth0 login.
 
-### Option A: Fly.io (paid, ~$2-5/month at this scale)
+### One-time set-up on the Oracle VM
 
-```bash
-# 1. Install the CLI and log in (one-time)
-brew install flyctl        # or see https://fly.io/docs/flyctl/install/
-fly auth login
+1. **Auth0.** Complete the tenant checklist above with your public hostname as `BASE_URL`,
+   and create your own account with the admin email.
+2. **DNS and network.** Create an A record for the hostname pointing at the VM's public IP.
+   In the Oracle console add ingress rules for TCP 80 and 443 on the VCN security list
+   (the host firewall is handled by the setup script).
+3. **Environment file** on the VM, as root:
 
-# 2. From the project root, create the app (pick a globally-unique name if
-#    "court-scheduler" is taken — edit the `app` line in fly.toml to match)
-fly launch --no-deploy
+   ```bash
+   sudo mkdir -p /etc/court-scheduler
+   sudo install -m 0600 -o root -g root /dev/null /etc/court-scheduler/env
+   sudo nano /etc/court-scheduler/env     # paste deploy/court-scheduler.env.example, filled in
+   ```
 
-# 3. Create a persistent volume for the database + WhatsApp session
-#    (must be in the same region as fly.toml's primary_region)
-fly volumes create court_scheduler_data --region iad --size 1
+4. **Sync and set up.** From your Mac, `./deploy/redeploy.sh` syncs the tree to `~/court-scheduler`
+   on the VM. Then on the VM:
 
-# 4. Deploy
-fly deploy
+   ```bash
+   cd ~/court-scheduler && ./deploy/setup-vm.sh your.hostname.example
+   ```
 
-# 5. Watch logs and scan the QR code
-fly logs
-```
+   This installs Node 24, a 2 GB swap file, Caddy with automatic HTTPS, opens 80 and 443
+   in the host firewall, closes 3000, sets the data directory to mode 0700, installs the
+   systemd unit (`deploy/court-scheduler.service`, which reads the environment file) and
+   starts the service.
 
-The app will be reachable at `https://<app-name>.fly.dev`. Open it, scan the QR
-code once, and the session persists on the volume across deploys/restarts.
+5. Open `https://your.hostname.example/`, sign in, and scan the QR code.
 
-**Before exposing this publicly**, note the web UI has no login — anyone with the
-URL can schedule messages, cancel pending ones, or log out the WhatsApp session.
-Consider adding basic auth (Fly supports a simple reverse-proxy or an Express
-middleware checking a shared secret from `fly secrets set`) before sharing the
-URL, or keep it on Fly's private network instead of its public one.
+The SSH tunnel (`ssh -L 3000:localhost:3000 ubuntu@<vm-ip>`) still works as an
+administrative path; the app itself is only reachable through Caddy.
 
-### Option B: Oracle Cloud Always Free VM (free forever)
+### Updating later
 
-Oracle Cloud's Always Free tier includes a small compute VM with persistent
-storage, at no cost indefinitely (not a time-limited trial). It requires a
-credit card at signup for identity verification, but Always Free resources are
-never billed. This is a real VM, so setup is closer to a traditional server
-than a git-push deploy.
+`./deploy/redeploy.sh` syncs the tree (removing files that were removed locally, never
+touching `data/` or the environment file), installs dependencies and the unit, and
+restarts the service. `DRY_RUN=1 ./deploy/redeploy.sh` shows what would change.
 
-**1. Create the VM** (console.oracle.com, after signup):
-- Compute → Instances → Create instance
-- Image: **Canonical Ubuntu** (latest LTS)
-- Shape: any **"Always Free eligible"** shape — `VM.Standard.A1.Flex` (ARM,
-  more RAM) or `VM.Standard.E2.1.Micro` (x86). If A1 shows "out of capacity"
-  in your region (a common free-tier issue), use E2.1.Micro or try a
-  different availability domain.
-- Add your SSH public key in the "Add SSH keys" section
-- Keep "Assign a public IPv4 address" checked
-- Create, then note the instance's public IP
+### Cutover from the password login (one time)
 
-**2. Copy the project to the VM** (run from your Mac — there's no git remote
-for this project, so `rsync` is simplest):
+The first start of this version migrates the database in one transaction: it adds the
+account columns, drops the password column, approves the admin, assigns existing
+messages to the admin, recreates the sessions table and sets the schema version to 1.
+Before that it writes `data/scheduler.pre-auth0.db`, a self-contained copy of the old
+database. The single legacy credential folder `data/auth` is moved to `data/wa/<admin id>`.
+The old code cannot start against the migrated schema, so back up first:
 
-```bash
-rsync -az --exclude node_modules --exclude data \
-  /Users/dkartsev/code/court-scheduler/ ubuntu@<vm-ip>:~/court-scheduler/
-```
+1. On the VM: `sudo systemctl stop court-scheduler && tar czf ~/court-scheduler-data-$(date +%F).tgz -C ~/court-scheduler data`
+2. Create the environment file (step 3 above), then redeploy and run the setup script.
+3. Sign in; your schedule is there; scan a fresh QR if the phone was not linked on the server.
+4. Link a second test phone and record the service memory (`systemctl status court-scheduler`
+   shows it) with zero, one and two linked phones. Approve people two at a time while watching it.
+   If two phones already exceed half the VM's memory, either move to an Always Free A1.Flex
+   instance (a new ARM VM: new IP, DNS re-pointed, setup re-run, tarball restored), if the region
+   has capacity, or record the per-phone figure here and keep the user count within it.
+5. Once everything works, delete the tarball and `data/scheduler.pre-auth0.db`; both contain the old password hash.
 
-**3. Install and start it** (run on the VM):
+**Rollback** before step 5: stop the service, restore `data/` from the tarball (or copy
+`scheduler.pre-auth0.db` over `scheduler.db` and delete the `-wal` and `-shm` files), move
+`data/wa/<admin id>` back to `data/auth`, sync the previous tree and restart.
 
-```bash
-ssh ubuntu@<vm-ip>
-cd ~/court-scheduler
-./deploy/setup-vm.sh
-```
+Memory measured on a laptop while building this: about 171 MB with no connection, 175 MB
+with one linked phone connected, 190 MB with two clients (one connected, one waiting for a scan).
+Record the VM's own figures here after cutover.
 
-This installs Node.js 24, runs `npm ci`, and installs+starts
-`deploy/court-scheduler.service` as a systemd service (auto-restarts on crash
-or reboot). Check it with `sudo systemctl status court-scheduler` or follow
-logs with `sudo journalctl -u court-scheduler -f`.
+## Notes
 
-**4. Open the web UI.** Since the UI has no login, the safest option is to
-**not** open any inbound port at all and instead tunnel over SSH:
-
-```bash
-ssh -L 3000:localhost:3000 ubuntu@<vm-ip>
-```
-
-then open http://localhost:3000 on your Mac. If you'd rather reach it directly
-from the internet, you must open the port in **two** places (both are
-required — Oracle blocks by default at both layers): the VCN's Security
-List/Network Security Group (Networking → Virtual Cloud Networks → your VCN →
-Security Lists → Add Ingress Rule, source `0.0.0.0/0`, TCP, destination port
-3000), and the VM's own firewall (`sudo iptables -I INPUT 6 -m state --state
-NEW -p tcp --dport 3000 -j ACCEPT && sudo netfilter-persistent save` on
-Ubuntu). Do this only if you've also added auth in front of the app.
-
-**Updating later**: re-run the `rsync` command, then on the VM run
-`cd ~/court-scheduler && npm ci --omit=dev && sudo systemctl restart court-scheduler`.
+- Baileys is an unofficial client. Keep the process running so scheduled messages go out,
+  and avoid bulk messaging, which can get a number banned.
+- `data/` holds every user's WhatsApp credentials, which are equivalent to their logged-in
+  phone session. Keep it at mode 0700 and out of any sync or backup that leaves the VM unencrypted.
