@@ -53,9 +53,8 @@ test('pending: 403 with state on the API, 200 on /api/me, the pending page on /'
   assert.deepEqual(me.json(), { email: 'pending@example.com', state: 'pending', isAdmin: false })
   const page = await request(srv.origin, '/', asUser(session))
   assert.match(page.headers.get('content-type'), /text\/html/)
-  assert.match(page.text, /pending/i)
-  assert.match(page.text, /ожида/i)
-  assert.doesNotMatch(page.text, /<title>Court Scheduler<\/title>|id="langSwitch"/, 'not the app shell')
+  assert.match(page.text, /data-state="pending"/)
+  assert.doesNotMatch(page.text, /src="\/app\.js"/, 'not the app shell')
 })
 
 test('AE2: a pending user approved in the database gets the app shell on the next request with the same cookie', async () => {
@@ -88,8 +87,7 @@ test('AE7: a disabled user with a valid session gets 403 with state disabled, 20
   assert.equal(me.status, 200)
   assert.equal(me.json().state, 'disabled')
   const page = await request(srv.origin, '/', asUser(session))
-  assert.match(page.text, /disabled/i)
-  assert.match(page.text, /отключ/i)
+  assert.match(page.text, /data-state="disabled"/)
   assert.doesNotMatch(page.text, /hello/)
 })
 
@@ -115,7 +113,7 @@ test('AE4: a user whose sessions were deleted gets 401, is silently re-signed by
   assert.ok(again.session)
   assert.notEqual(again.session.value, session.value)
   const page = await request(srv.origin, '/', asUser(again.session))
-  assert.match(page.text, /disabled/i)
+  assert.match(page.text, /data-state="disabled"/)
   assert.doesNotMatch(page.text, /secret text/)
   const data = await request(srv.origin, '/api/messages', asUser(again.session))
   assert.equal(data.status, 403)

@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
@@ -19,6 +20,8 @@ const LOGIN_PATH = '/auth/login'
 const LOGOUT_PATH = '/auth/logout'
 const LANGS = new Set(['ru', 'en'])
 const STATES = new Set(['pending', 'approved', 'disabled'])
+const CSP = "default-src 'self'; frame-ancestors 'none'; img-src 'self' data:"
+const ACCOUNT_PAGE = fs.readFileSync(path.join(PUBLIC_DIR, 'account.html'), 'utf8')
 
 // ---- small HTML pages rendered inline (the real pages come in a later unit) ----
 
@@ -32,11 +35,13 @@ function page({ lang, title, ru, en, state, signInAgain }) {
   return `<!DOCTYPE html>
 <html lang="${safeLang}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title>
-<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;line-height:1.5}</style></head>
-<body${state ? ` data-state="${escapeHtml(state)}"` : ''}>
+<link rel="stylesheet" href="/styles.css"></head>
+<body class="state-page"${state ? ` data-state="${escapeHtml(state)}"` : ''}>
+<main><section class="card">
 <p lang="ru">${escapeHtml(ru)}</p>
 <p lang="en">${escapeHtml(en)}</p>
 ${link}
+</section></main>
 </body>
 </html>`
 }
@@ -61,11 +66,10 @@ function sendConfirmEmailPage(res, lang) {
   }))
 }
 
-function sendStatePage(res, state, lang) {
-  const text = state === 'disabled'
-    ? { ru: 'Ваш аккаунт отключён.', en: 'Your account is disabled.' }
-    : { ru: 'Ваш аккаунт ожидает подтверждения администратором.', en: 'Your account is pending approval.' }
-  res.status(200).type('html').send(page({ lang, title: `Court Scheduler — ${state}`, ...text, state }))
+function sendStatePage(res, state) {
+  // only an allowlisted token is injected, never anything about the person
+  const token = state === 'disabled' ? 'disabled' : 'pending'
+  res.status(200).type('html').send(ACCOUNT_PAGE.replace('data-state=""', `data-state="${token}"`))
 }
 
 // ---- helpers ----------------------------------------------------------------
@@ -128,6 +132,7 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
   app.use(express.json({ limit: '64kb' }))
 
   app.use((req, res, next) => {
+    res.setHeader('Content-Security-Policy', CSP)
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next()
     if (!sameOrigin(req)) return res.status(403).json({ error: 'Cross-site request refused.' })
     next()
@@ -208,8 +213,16 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     const session = readSession(req)
     if (!session) return res.redirect(302, LOGIN_PATH)
     if (session.state === 'approved') return res.sendFile(path.join(PUBLIC_DIR, 'index.html'))
-    sendStatePage(res, STATES.has(session.state) ? session.state : 'disabled', pickLang(req))
+    sendStatePage(res, STATES.has(session.state) ? session.state : 'disabled')
   })
+  app.get(['/admin', '/admin.html'], (req, res) => {
+    const session = readSession(req)
+    if (!session) return res.redirect(302, LOGIN_PATH)
+    if (!isAdmin(session)) return res.redirect(302, '/')
+    res.sendFile(path.join(PUBLIC_DIR, 'admin.html'))
+  })
+  // the state page is only ever served with its token injected by the route above
+  app.get('/account.html', (_req, res) => res.redirect(302, '/'))
   app.use(express.static(PUBLIC_DIR, { index: false }))
 
   // ---- API gate: 401 without a session, 403 with the state unless approved ----
