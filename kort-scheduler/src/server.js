@@ -4,7 +4,7 @@ import express from 'express'
 import { authenticate, login, logout } from './auth.js'
 import { messages, sessions } from './db.js'
 import { REPEAT_RULES } from './recurrence.js'
-import { whatsapp } from './whatsapp.js'
+import { clients } from './clients.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MAX_MESSAGE_LENGTH = 4096
@@ -69,15 +69,17 @@ export function createApp() {
     next()
   })
 
-  app.get('/api/status', (_req, res) => {
-    res.json({ ...whatsapp.snapshot(), serverTime: Date.now() })
+  app.get('/api/status', (req, res) => {
+    clients.ensure(req.user.user_id)
+    res.json({ ...clients.snapshot(req.user.user_id), serverTime: Date.now() })
   })
 
   app.get('/api/groups', async (req, res, next) => {
-    if (!whatsapp.connected) return res.status(503).json({ error: 'WhatsApp is not connected' })
+    const client = clients.get(req.user.user_id)
+    if (!client?.connected) return res.status(503).json({ error: 'WhatsApp is not connected' })
     try {
       const force = req.query.refresh === '1'
-      res.json(await whatsapp.listGroups({ force }))
+      res.json(await client.listGroups({ force }))
     } catch (err) {
       next(err)
     }
@@ -137,9 +139,10 @@ export function createApp() {
     res.status(204).end()
   })
 
-  app.post('/api/logout', async (_req, res, next) => {
+  app.post('/api/logout', async (req, res, next) => {
     try {
-      await whatsapp.logout()
+      const client = clients.ensure(req.user.user_id)
+      await client.logout()
       res.json({ ok: true })
     } catch (err) {
       next(err)

@@ -1,7 +1,7 @@
 import { config } from './config.js'
 import { messages } from './db.js'
 import { nextOccurrence } from './recurrence.js'
-import { whatsapp } from './whatsapp.js'
+import { clients } from './clients.js'
 
 let timer = null
 let running = false
@@ -9,10 +9,11 @@ let running = false
 // Once a recurring message reaches a terminal state (sent or permanently
 // failed), queue up its next occurrence so the series keeps going.
 function scheduleNextOccurrence(row) {
-  const anchor = messages.get(row.series_id ?? row.id)
+  const anchor = messages.getById(row.series_id ?? row.id)
   const sendAt = nextOccurrence(row.send_at, row.repeat_rule, anchor?.send_at)
   if (!sendAt) return
   const next = messages.create({
+    ownerId: row.owner_id,
     groupJid: row.group_jid,
     groupName: row.group_name,
     message: row.message,
@@ -27,13 +28,14 @@ async function tick() {
   if (running) return
   running = true
   try {
-    if (!whatsapp.connected) return // leave messages pending; they go out once connected
     const now = Date.now()
     for (const row of messages.due(now)) {
+      const client = clients.get(row.owner_id)
+      if (!client?.connected) continue // leave the row pending; it goes out once that user's phone is connected
       if (!messages.claim(row.id)) continue
       const attempts = row.attempts + 1
       try {
-        await whatsapp.sendText(row.group_jid, row.message)
+        await client.sendText(row.group_jid, row.message)
         messages.markSent(row.id)
         console.log(`[scheduler] sent #${row.id} to ${row.group_name ?? row.group_jid}`)
         if (row.repeat_rule !== 'none') scheduleNextOccurrence(row)
@@ -61,8 +63,8 @@ export const scheduler = {
     if (timer) return
     timer = setInterval(tick, config.tickMs)
     tick()
-    // Run a tick as soon as we (re)connect so overdue messages go out promptly.
-    whatsapp.on('status', (s) => s === 'connected' && tick())
+    // Run a tick as soon as any user's phone (re)connects so overdue messages go out promptly.
+    clients.events.on('connected', () => tick())
   },
   stop() {
     clearInterval(timer)

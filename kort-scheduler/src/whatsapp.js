@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import path from 'node:path'
 import { EventEmitter } from 'node:events'
 import makeWASocket, {
   DisconnectReason,
@@ -7,17 +8,29 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   Browsers,
 } from '@whiskeysockets/baileys'
-import pino from 'pino'
 import QRCode from 'qrcode'
-import { config } from './config.js'
 
-const logger = pino({ level: config.waLogLevel })
+// The WhatsApp Web version is fetched over the network; do it once per process
+// and share it with every client instead of once per socket start.
+let versionPromise = null
+export function resolveWaVersion(logger) {
+  if (!versionPromise) {
+    versionPromise = fetchLatestBaileysVersion()
+      .then((r) => r.version)
+      .catch((err) => {
+        logger?.warn?.({ err }, 'could not fetch latest WA version, using bundled default')
+        return undefined
+      })
+  }
+  return versionPromise
+}
 
 /**
- * Manages a single WhatsApp connection: login via QR, auto-reconnect,
- * group listing and text sending.
+ * One WhatsApp connection for one user: login via QR, auto-reconnect, group
+ * listing and text sending. Credentials live in `authDir` and nothing else
+ * ever reads or deletes that folder.
  */
-class WhatsAppClient extends EventEmitter {
+export class WhatsAppClient extends EventEmitter {
   sock = null
   status = 'disconnected' // disconnected | connecting | qr | connected | logged_out
   qrDataUrl = null
@@ -27,48 +40,69 @@ class WhatsAppClient extends EventEmitter {
   #groupMeta = new Map()
   #reconnectTimer = null
   #stopped = false
+  #generation = 0
+
+  constructor({ authDir, logger, socketFactory = makeWASocket, versionProvider = null, groupCacheMs = 60_000 }) {
+    super()
+    if (typeof authDir !== 'string' || !authDir) throw new TypeError('WhatsAppClient needs an authDir')
+    this.authDir = authDir
+    this.logger = logger
+    this.socketFactory = socketFactory
+    this.versionProvider = versionProvider ?? (() => resolveWaVersion(logger))
+    this.groupCacheMs = groupCacheMs
+  }
 
   get connected() {
     return this.status === 'connected' && !!this.sock
   }
 
+  // Credentials saved on disk, whether or not a socket is open right now.
+  get linked() {
+    return fs.existsSync(path.join(this.authDir, 'creds.json'))
+  }
+
   async start() {
+    const generation = ++this.#generation
     this.#stopped = false
     clearTimeout(this.#reconnectTimer)
     this.#setStatus('connecting')
 
-    const { state, saveCreds } = await useMultiFileAuthState(config.authDir)
-    let version
-    try {
-      ;({ version } = await fetchLatestBaileysVersion())
-    } catch (err) {
-      logger.warn({ err }, 'could not fetch latest WA version, using bundled default')
-    }
+    const { state, saveCreds } = await useMultiFileAuthState(this.authDir)
+    if (generation !== this.#generation) return
+    const version = await this.versionProvider()
+    if (generation !== this.#generation) return
 
-    const sock = makeWASocket({
+    const sock = this.socketFactory({
       version,
-      logger,
+      logger: this.logger,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
+        keys: makeCacheableSignalKeyStore(state.keys, this.logger),
       },
       browser: Browsers.macOS('Desktop'),
       markOnlineOnConnect: false,
       syncFullHistory: false,
+      shouldSyncHistoryMessage: () => false,
       cachedGroupMetadata: async (jid) => this.#groupMeta.get(jid),
     })
+    if (generation !== this.#generation) {
+      // stop() ran while we were awaiting; this socket must not live on
+      try { sock.end?.(undefined) } catch {}
+      return
+    }
     this.sock = sock
 
     sock.ev.on('creds.update', saveCreds)
 
     sock.ev.on('connection.update', async (update) => {
+      if (this.sock !== sock) return // event from a socket that was already replaced or stopped
       const { connection, lastDisconnect, qr } = update
 
       if (qr) {
         try {
           this.qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 320 })
         } catch (err) {
-          logger.error({ err }, 'failed to render QR')
+          this.logger?.error?.({ err }, 'failed to render QR')
         }
         this.#setStatus('qr')
       }
@@ -78,7 +112,7 @@ class WhatsAppClient extends EventEmitter {
         this.lastError = null
         this.me = sock.user ?? null
         this.#setStatus('connected')
-        logger.info({ me: this.me }, 'WhatsApp connected')
+        this.logger?.info?.({ me: this.me }, 'WhatsApp connected')
       }
 
       if (connection === 'close') {
@@ -90,13 +124,12 @@ class WhatsAppClient extends EventEmitter {
         this.me = null
 
         if (loggedOut) {
-          logger.warn('logged out from WhatsApp; clearing credentials')
+          this.logger?.warn?.('logged out from WhatsApp; clearing credentials')
           this.#setStatus('logged_out')
-          fs.rmSync(config.authDir, { recursive: true, force: true })
-          // Start again so a fresh QR is offered.
-          this.#scheduleReconnect(1000)
+          fs.rmSync(this.authDir, { recursive: true, force: true })
+          if (!this.#stopped) this.#scheduleReconnect(1000) // offer a fresh QR
         } else if (!this.#stopped) {
-          logger.warn({ statusCode, err: this.lastError }, 'connection closed; reconnecting')
+          this.logger?.warn?.({ statusCode, err: this.lastError }, 'connection closed; reconnecting')
           this.#setStatus('disconnected')
           this.#scheduleReconnect(3000)
         } else {
@@ -125,11 +158,13 @@ class WhatsAppClient extends EventEmitter {
   #scheduleReconnect(delay) {
     clearTimeout(this.#reconnectTimer)
     this.#reconnectTimer = setTimeout(() => {
+      if (this.#stopped) return
       this.start().catch((err) => {
-        logger.error({ err }, 'reconnect failed')
+        this.logger?.error?.({ err }, 'reconnect failed')
         this.#scheduleReconnect(10_000)
       })
     }, delay)
+    this.#reconnectTimer.unref?.()
   }
 
   #setStatus(status) {
@@ -142,7 +177,7 @@ class WhatsAppClient extends EventEmitter {
   /** Returns [{ jid, name, participants }] sorted by name. */
   async listGroups({ force = false } = {}) {
     if (!this.connected) throw new Error('WhatsApp is not connected')
-    const fresh = Date.now() - this.#groupCache.at < config.groupCacheMs
+    const fresh = Date.now() - this.#groupCache.at < this.groupCacheMs
     if (!force && fresh) return this.#groupCache.list
 
     const all = await this.sock.groupFetchAllParticipating()
@@ -161,28 +196,34 @@ class WhatsAppClient extends EventEmitter {
     return this.sock.sendMessage(jid, { text })
   }
 
+  /** Unlink the phone: tells WhatsApp, deletes this user's credentials, then offers a fresh QR. */
   async logout() {
     this.#stopped = true
+    this.#generation++
     clearTimeout(this.#reconnectTimer)
     try {
       await this.sock?.logout()
     } catch (err) {
-      logger.warn({ err }, 'logout call failed; clearing local credentials anyway')
+      this.logger?.warn?.({ err }, 'logout call failed; clearing local credentials anyway')
     }
     this.sock = null
-    fs.rmSync(config.authDir, { recursive: true, force: true })
+    fs.rmSync(this.authDir, { recursive: true, force: true })
     this.#groupCache = { at: 0, list: [] }
     this.#groupMeta.clear()
     this.#setStatus('logged_out')
-    // Offer a fresh QR right away.
     await this.start()
   }
 
+  /** Pause: close the socket, keep the credentials, suppress reconnects. */
   async stop() {
     this.#stopped = true
+    this.#generation++
     clearTimeout(this.#reconnectTimer)
-    this.sock?.end(undefined)
+    const sock = this.sock
     this.sock = null
+    try { sock?.end?.(undefined) } catch {}
+    this.qrDataUrl = null
+    this.me = null
     this.#setStatus('disconnected')
   }
 
@@ -193,8 +234,7 @@ class WhatsAppClient extends EventEmitter {
       qr: this.status === 'qr' ? this.qrDataUrl : null,
       me: this.me ? { id: this.me.id, name: this.me.name ?? null } : null,
       lastError: this.lastError,
+      linked: this.linked,
     }
   }
 }
-
-export const whatsapp = new WhatsAppClient()

@@ -23,8 +23,6 @@ export const config = {
   backupPath: path.join(DATA_DIR, 'scheduler.pre-auth0.db'),
   // Credentials of the single pre-multi-user link; moved to the admin's folder at first start.
   legacyAuthDir: path.join(DATA_DIR, 'auth'),
-  // Transitional alias for the single-connection client; removed when clients get their own folder.
-  authDir: path.join(DATA_DIR, 'auth'),
   waRoot: path.join(DATA_DIR, 'wa'),
   authDirFor(userId) {
     if (!Number.isInteger(userId) || userId <= 0) throw new TypeError('authDirFor needs a positive integer user id')

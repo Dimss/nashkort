@@ -9,7 +9,8 @@ if (missing.length) {
 // Loaded after validation so the database (which may need ADMIN_EMAIL to migrate) opens with the config present.
 const { bootstrap } = await import('./bootstrap.js')
 const { createApp } = await import('./server.js')
-const { whatsapp } = await import('./whatsapp.js')
+const { clients } = await import('./clients.js')
+const { users } = await import('./db.js')
 const { scheduler } = await import('./scheduler.js')
 
 bootstrap()
@@ -19,8 +20,8 @@ const server = app.listen(config.port, () => {
   console.log(`Web UI: http://localhost:${config.port}`)
 })
 
-whatsapp.start().catch((err) => {
-  console.error('Failed to start WhatsApp client', err)
+clients.bootAll(users.list().filter((u) => u.state === 'approved').map((u) => u.id)).catch((err) => {
+  console.error('Failed to start WhatsApp clients', err)
 })
 scheduler.start()
 
@@ -28,7 +29,7 @@ async function shutdown() {
   console.log('Shutting down…')
   scheduler.stop()
   server.close()
-  await whatsapp.stop()
+  await clients.stopAll()
   process.exit(0)
 }
 process.on('SIGINT', shutdown)
