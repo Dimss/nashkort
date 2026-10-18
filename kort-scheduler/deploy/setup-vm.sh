@@ -22,6 +22,20 @@ if ! sudo test -s "$ENV_FILE"; then
   exit 1
 fi
 sudo chown root:root "$ENV_FILE" && sudo chmod 0600 "$ENV_FILE"
+for key in ADMIN_EMAIL BASE_URL AUTH0_DOMAIN AUTH0_CLIENT_ID AUTH0_CLIENT_SECRET; do
+  if ! sudo grep -qE "^$key=.+" "$ENV_FILE"; then
+    echo "$ENV_FILE: $key is not set." >&2
+    exit 1
+  fi
+done
+if sudo grep -q 'example\.com' "$ENV_FILE"; then
+  echo "$ENV_FILE still contains example.com placeholders." >&2
+  exit 1
+fi
+if ! sudo grep -qxF "BASE_URL=https://$APP_HOSTNAME" "$ENV_FILE"; then
+  echo "$ENV_FILE: BASE_URL must be exactly https://$APP_HOSTNAME" >&2
+  exit 1
+fi
 
 cd "$(dirname "$0")/.."
 
@@ -59,7 +73,12 @@ sudo systemctl reload caddy
 # allow 80 and 443 before the final REJECT, and stop exposing the app port.
 for port in 80 443; do
   if ! sudo iptables -C INPUT -m state --state NEW -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
-    sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport "$port" -j ACCEPT
+    reject_line="$(sudo iptables -L INPUT -n --line-numbers | awk '$2 == "REJECT" { print $1; exit }')"
+    if [[ -n "$reject_line" ]]; then
+      sudo iptables -I INPUT "$reject_line" -m state --state NEW -p tcp --dport "$port" -j ACCEPT
+    else
+      sudo iptables -A INPUT -m state --state NEW -p tcp --dport "$port" -j ACCEPT
+    fi
   fi
 done
 while sudo iptables -C INPUT -p tcp --dport 3000 -m state --state NEW -j ACCEPT 2>/dev/null; do

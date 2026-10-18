@@ -157,9 +157,11 @@ administrative path; the app itself is only reachable through Caddy.
 
 ### Updating later
 
-`./deploy/redeploy.sh` syncs the tree (removing files that were removed locally, never
-touching `data/` or the environment file), installs dependencies and the unit, and
-restarts the service. `DRY_RUN=1 ./deploy/redeploy.sh` shows what would change.
+`./deploy/redeploy.sh` checks that the environment file on the VM is complete, keeps a copy
+of the current tree in `~/court-scheduler-prev`, syncs the tree (removing files that were
+removed locally, never touching `data/` or the environment file), installs dependencies and
+the unit, and restarts the service. The unit caps the service at 700 MB and stops retrying
+after five quick failures, so a bad environment file shows in `systemctl status`. `DRY_RUN=1 ./deploy/redeploy.sh` shows what would change.
 
 ### Cutover from the password login (one time)
 
@@ -170,19 +172,58 @@ Before that it writes `data/scheduler.pre-auth0.db`, a self-contained copy of th
 database. The single legacy credential folder `data/auth` is moved to `data/wa/<admin id>`.
 The old code cannot start against the migrated schema, so back up first:
 
-1. On the VM: `sudo systemctl stop court-scheduler && tar czf ~/court-scheduler-data-$(date +%F).tgz -C ~/court-scheduler data`
-2. Create the environment file (step 3 above), then redeploy and run the setup script.
-3. Sign in; your schedule is there; scan a fresh QR if the phone was not linked on the server.
-4. Link a second test phone and record the service memory (`systemctl status court-scheduler`
+1. On the VM, stop the service and take backups only you can read, then copy them off the VM:
+   ```
+   sudo systemctl stop court-scheduler
+   (umask 077; tar czf ~/court-scheduler-data-$(date +%F).tgz -C ~/court-scheduler data)
+   (umask 077; tar czf ~/court-scheduler-tree-$(date +%F).tgz --exclude=node_modules --exclude=data -C ~ court-scheduler)
+   sudo cp /etc/systemd/system/court-scheduler.service ~/court-scheduler.service.old
+   ```
+   From your machine: `scp ubuntu@<vm>:court-scheduler-*.tgz ~/backups/`.
+2. Check that the legacy account's email is byte for byte the value you will put in `ADMIN_EMAIL`.
+   The cutover matches the stored string exactly; a difference in case or spacing leaves the old
+   account pending next to a new admin row.
+   ```
+   cd ~/court-scheduler && node -e 'const {DatabaseSync}=require("node:sqlite");console.log(new DatabaseSync("data/scheduler.db").prepare("SELECT id,email FROM users").all())'
+   ```
+   If it differs, fix the row first: `node -e '...prepare("UPDATE users SET email=? WHERE id=?").run("you@example.com", 1)'`.
+3. Create the environment file (step 3 above), then `DRY_RUN=1 ./deploy/redeploy.sh` and `./deploy/redeploy.sh`
+   from your machine (it refuses to run until the environment file is complete and keeps the previous
+   tree in `~/court-scheduler-prev`), then run the setup script on the VM.
+4. Sign in; your schedule is there; scan a fresh QR if the phone was not linked on the server.
+5. Verify the migrated database before trusting it. Each line prints what its comment says:
+   ```
+   cd ~/court-scheduler && node -e '
+   const {DatabaseSync}=require("node:sqlite");const d=new DatabaseSync("data/scheduler.db",{readOnly:true});const q=s=>d.prepare(s).all();
+   console.log(q("PRAGMA user_version"));                                              // [ { user_version: 1 } ]
+   console.log(q("PRAGMA table_info(users)").some(c=>c.name==="password_hash"));         // false
+   console.log(q("SELECT email FROM users WHERE state=\x27approved\x27"));              // only the admin
+   console.log(q("SELECT count(*) n FROM scheduled_messages WHERE owner_id IS NULL"));  // [ { n: 0 } ]
+   console.log(q("SELECT series_id FROM scheduled_messages WHERE status=\x27pending\x27 AND series_id IS NOT NULL GROUP BY series_id HAVING count(*)>1")); // []
+   console.log(q("SELECT series_id FROM scheduled_messages WHERE series_id IS NOT NULL GROUP BY series_id HAVING count(DISTINCT owner_id)>1"));           // []
+   console.log(q("PRAGMA foreign_key_check"), q("PRAGMA integrity_check"));            // [] [ { integrity_check: "ok" } ]'
+   ls -l data/scheduler.pre-auth0.db                                                    # the backup exists
+   ```
+   Anything else: roll back (below) and investigate before going on.
+6. Link a second test phone and record the service memory (`systemctl status court-scheduler`
    shows it) with zero, one and two linked phones. Approve people two at a time while watching it.
    If two phones already exceed half the VM's memory, either move to an Always Free A1.Flex
    instance (a new ARM VM: new IP, DNS re-pointed, setup re-run, tarball restored), if the region
    has capacity, or record the per-phone figure here and keep the user count within it.
-5. Once everything works, delete the tarball and `data/scheduler.pre-auth0.db`; both contain the old password hash.
+7. Once everything works, delete the tarballs and `data/scheduler.pre-auth0.db`; they contain the old password hash.
 
-**Rollback** before step 5: stop the service, restore `data/` from the tarball (or copy
-`scheduler.pre-auth0.db` over `scheduler.db` and delete the `-wal` and `-shm` files), move
-`data/wa/<admin id>` back to `data/auth`, sync the previous tree and restart.
+**Rollback** before step 7. Never unpack over the migrated files: a leftover `scheduler.db-wal`
+next to the old database corrupts it.
+```
+sudo systemctl stop court-scheduler caddy
+mv ~/court-scheduler/data ~/court-scheduler/data.failed
+tar xzf ~/court-scheduler-data-<date>.tgz -C ~/court-scheduler      # or: mkdir -m 700 ~/court-scheduler/data && cp ~/court-scheduler/data.failed/scheduler.pre-auth0.db ~/court-scheduler/data/scheduler.db
+tar xzf ~/court-scheduler-tree-<date>.tgz -C ~                        # or: rsync -a --delete --exclude node_modules --exclude data ~/court-scheduler-prev/ ~/court-scheduler/
+sudo cp ~/court-scheduler.service.old /etc/systemd/system/court-scheduler.service && sudo systemctl daemon-reload
+cd ~/court-scheduler && npm ci --omit=dev && sudo systemctl start court-scheduler
+```
+With the copy variant, also move `data.failed/wa/<admin id>` back to `data/auth` if the phone was
+linked after the cutover.
 
 Memory measured on a laptop while building this: about 171 MB with no connection, 175 MB
 with one linked phone connected, 190 MB with two clients (one connected, one waiting for a scan).

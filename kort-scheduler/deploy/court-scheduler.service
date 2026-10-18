@@ -2,6 +2,10 @@
 Description=WhatsApp Scheduler
 After=network-online.target
 Wants=network-online.target
+# A bad environment file or a failed migration stops after five quick restarts
+# and shows in `systemctl status` instead of looping forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -15,6 +19,9 @@ EnvironmentFile=/etc/court-scheduler/env
 ExecStart=/usr/bin/node --no-warnings=ExperimentalWarning --max-old-space-size=512 src/index.js
 Restart=always
 RestartSec=5
+# On the 1 GB VM the app, not sshd or Caddy, is what gets killed under memory pressure.
+MemoryMax=700M
+OOMScoreAdjust=500
 
 # Hardening
 NoNewPrivileges=true
