@@ -71,10 +71,12 @@ export function createRegistry({ makeClient, idleMs = 5 * 60_000, staggerMs = 20
       await Promise.all(all.map((id) => registry.stop(id)))
     },
 
+    // Only a client still waiting for a scan is swept: a linked client passes through
+    // 'connecting' on every reconnect and must survive without a page open.
     sweepIdle(now = Date.now()) {
       for (const [userId, client] of clients) {
         const polled = lastPollAt.get(userId) ?? 0
-        if (IDLE_STATUSES.has(client.status) && now - polled > idleMs) {
+        if (!client.linked && IDLE_STATUSES.has(client.status) && now - polled > idleMs) {
           client.logger?.info?.('stopping idle unlinked client')
           registry.stop(userId).catch(() => {})
         }

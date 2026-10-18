@@ -281,3 +281,41 @@ test('under an https base URL both cookies carry the __Host- prefix and the Secu
     await secure.close()
   }
 })
+
+test('without an end-session endpoint, sign-out goes to the legacy /v2/logout URL with client_id and returnTo', async () => {
+  const legacy = createFakeIssuer({ endSession: false })
+  const app2 = await startApp(createApp({ fetch: legacy.fetch }))
+  try {
+    const { session } = await signIn(app2.origin, legacy, verified('auth0|legacy-logout', 'legacy-logout@example.com'))
+    assert.ok(session)
+    const res = await request(app2.origin, '/auth/logout', { method: 'POST', headers: { origin: 'http://app.local' }, cookies: { [session.name]: session.value } })
+    assert.ok(res.status === 302 || res.status === 303, `status ${res.status}`)
+    const url = new URL(res.location)
+    assert.equal(url.origin + url.pathname, `${legacy.issuer}/v2/logout`)
+    assert.equal(url.searchParams.get('client_id'), 'test-client')
+    assert.equal(url.searchParams.get('returnTo'), 'http://app.local/')
+    assert.equal(url.searchParams.get('post_logout_redirect_uri'), null)
+  } finally { await app2.close() }
+})
+
+test('logoutUrl: a JWT hint becomes id_token_hint, a plain sid becomes logout_hint', async () => {
+  const { createOidc } = await env.load('oidc.js')
+  const oidc = createOidc({ issuer: issuer.issuer, clientId: 'test-client', clientSecret: 'test-secret', baseUrl: 'http://app.local', fetch: issuer.fetch })
+  const jwt = new URL(await oidc.logoutUrl('aGVhZGVy.cGF5bG9hZA.c2ln'))
+  assert.equal(jwt.searchParams.get('id_token_hint'), 'aGVhZGVy.cGF5bG9hZA.c2ln')
+  assert.equal(jwt.searchParams.get('logout_hint'), null)
+  const sid = new URL(await oidc.logoutUrl('sid-1'))
+  assert.equal(sid.searchParams.get('logout_hint'), 'sid-1')
+  assert.equal(sid.searchParams.get('id_token_hint'), null)
+})
+
+test('logoutUrl falls back to the legacy URL when discovery fails, so sign-out still leaves the app', async () => {
+  const { createOidc } = await env.load('oidc.js')
+  let calls = 0
+  const oidc = createOidc({ issuer: 'https://down.example', clientId: 'test-client', clientSecret: 'test-secret', baseUrl: 'http://app.local', fetch: async () => { calls++; throw new Error('ECONNREFUSED') } })
+  const url = new URL(await oidc.logoutUrl('sid-1'))
+  assert.equal(url.origin + url.pathname, 'https://down.example/v2/logout')
+  assert.equal(url.searchParams.get('client_id'), 'test-client')
+  assert.equal(url.searchParams.get('returnTo'), 'http://app.local/')
+  assert.ok(calls >= 1)
+})

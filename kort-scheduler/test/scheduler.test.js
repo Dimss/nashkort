@@ -1,6 +1,8 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { freshData } from './helpers/tempdata.js'
 
 let env, config, db, messages, users, database, transaction, createScheduler, sweepMissed
@@ -29,7 +31,9 @@ function fakeRegistry() {
   const events = new EventEmitter()
   return {
     events,
+    ensured: [],
     get(userId) { return map.get(userId) },
+    ensure(userId) { this.ensured.push(userId) },
     connect(userId, sendText = async () => {}) {
       const sent = []
       const client = { connected: true, sent, sendText: async (jid, text) => { sent.push([jid, text]); return sendText(jid, text) } }
@@ -73,6 +77,27 @@ test('a due row whose owner is disconnected stays pending with zero attempts acr
   assert.equal(after.status, 'pending')
   assert.equal(after.attempts, 0)
   assert.equal(client.sent.length, 0)
+})
+
+test('a due row whose owner has saved credentials but no client asks the registry to start one and stays pending', async () => {
+  const u = approvedUser()
+  mkdirSync(config.authDirFor(u.id), { recursive: true }); writeFileSync(join(config.authDirFor(u.id), 'creds.json'), '{}')
+  const registry = fakeRegistry()
+  const m = row(u.id)
+  const s = makeScheduler(registry)
+  await s.tick(); await s.tick()
+  assert.deepEqual(registry.ensured.filter((id) => id === u.id), [u.id, u.id], 'asked once per tick')
+  assert.equal(messages.getById(m.id).status, 'pending')
+  assert.equal(messages.getById(m.id).attempts, 0)
+})
+
+test('a due row whose owner has neither credentials nor a client is left alone', async () => {
+  const u = approvedUser()
+  const registry = fakeRegistry()
+  const m = row(u.id)
+  await makeScheduler(registry).tick()
+  assert.ok(!registry.ensured.includes(u.id), 'no start requested for an owner with nothing to link')
+  assert.equal(messages.getById(m.id).status, 'pending')
 })
 
 test('a due row for a connected owner goes out through that owner\'s client and is marked sent', async () => {

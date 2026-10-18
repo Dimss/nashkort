@@ -168,3 +168,33 @@ test('errors without an explicit status answer { error: "Internal error" }; malf
   const body = await res.json()
   assert.equal(typeof body.error, 'string')
 })
+
+test('R16/R17: over HTTP a user cannot read, cancel or delete another user\'s message, and validation answers 400', async () => {
+  const post = { method: 'POST', headers: { origin: 'http://app.local' } }
+  const a = (await signIn(srv.origin, issuer, verified('auth0|owner-a', 'owner-a@example.com'))).session
+  const b = (await signIn(srv.origin, issuer, verified('auth0|owner-b', 'owner-b@example.com'))).session
+  const idA = users.findBySub('auth0|owner-a').id
+  users.setState(idA, 'approved'); users.setState(users.findBySub('auth0|owner-b').id, 'approved')
+
+  const created = await request(srv.origin, '/api/messages', { ...post, ...asUser(a), body: { groupJid: 'g@g.us', groupName: 'G', message: 'mine', sendAt: future() } })
+  assert.equal(created.status, 201)
+  const id = created.json().id
+  assert.equal(created.json().owner_id, idA)
+
+  assert.deepEqual((await request(srv.origin, '/api/messages', asUser(b))).json(), [])
+  assert.equal((await request(srv.origin, `/api/messages/${id}/cancel`, { ...post, ...asUser(b) })).status, 404)
+  assert.equal((await request(srv.origin, `/api/messages/${id}`, { method: 'DELETE', headers: post.headers, ...asUser(b) })).status, 404)
+  assert.equal(messages.getById(id).status, 'pending', 'the other user changed nothing')
+  assert.equal((await request(srv.origin, '/api/messages', asUser(a))).json().length, 1)
+
+  const own = await request(srv.origin, `/api/messages/${id}/cancel`, { ...post, ...asUser(a) })
+  assert.equal(own.status, 200)
+  assert.notEqual(messages.getById(id).status, 'pending')
+  assert.equal((await request(srv.origin, `/api/messages/${id}/cancel`, { ...post, ...asUser(a) })).status, 409)
+
+  const bad = (body) => request(srv.origin, '/api/messages', { ...post, ...asUser(a), body })
+  assert.equal((await bad({ groupJid: 'x@s.whatsapp.net', message: 'hi', sendAt: future() })).status, 400)
+  assert.equal((await bad({ groupJid: 'g@g.us', message: '   ', sendAt: future() })).status, 400)
+  assert.equal((await bad({ groupJid: 'g@g.us', message: 'hi', sendAt: Date.now() - 3600_000 })).status, 400)
+  assert.equal((await bad({ groupJid: 'g@g.us', message: 'hi', sendAt: future(), repeat: 'hourly' })).status, 400)
+})

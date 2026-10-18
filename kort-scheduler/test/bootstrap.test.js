@@ -32,6 +32,32 @@ test('bootstrap with a new admin email creates the approved admin and leaves the
   } finally { env.cleanup() }
 })
 
+test('a disabled account that becomes the configured admin is enabled through the missed sweep, not a bare approve', async () => {
+  process.env.ADMIN_EMAIL = 'first@example.com'
+  const env = await freshData()
+  try {
+    const { users, messages, database } = await env.load('db.js')
+    const { bootstrap } = await env.load('bootstrap.js')
+    bootstrap()
+    const paused = users.insertPending({ email: 'paused@example.com', sub: 'auth0|paused' })
+    users.setState(paused.id, 'approved')
+    const overdue = messages.create({ ownerId: paused.id, groupJid: 'g@g.us', groupName: 'G', message: 'late', sendAt: Date.now() - 5 * 60_000 })
+    const weekly = messages.create({ ownerId: paused.id, groupJid: 'g@g.us', groupName: 'G', message: 'weekly', sendAt: Date.now() - 16 * 24 * 3600_000, repeat: 'weekly' })
+    users.setState(paused.id, 'disabled')
+    process.env.ADMIN_EMAIL = 'paused@example.com'
+    const { bootstrap: again } = await env.load('bootstrap.js')
+    const { admin } = again()
+    assert.equal(admin.id, paused.id)
+    assert.equal(admin.state, 'approved')
+    assert.equal(messages.getById(overdue.id).status, 'missed')
+    assert.equal(messages.getById(weekly.id).status, 'missed')
+    const pending = database.prepare("SELECT send_at FROM scheduled_messages WHERE owner_id = ? AND status = 'pending'").all(paused.id)
+    assert.equal(pending.length, 1, 'the weekly series continues with one future row')
+    assert.ok(pending[0].send_at > Date.now())
+    assert.equal(users.findByEmail('first@example.com').state, 'approved', 'the previous admin keeps an ordinary approved account')
+  } finally { env.cleanup() }
+})
+
 test('start-up without ADMIN_EMAIL exits non-zero naming the variable and no value', async () => {
   const env = await freshData()
   try {

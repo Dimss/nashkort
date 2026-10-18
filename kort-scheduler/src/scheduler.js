@@ -2,6 +2,7 @@ import { config as defaultConfig } from './config.js'
 import { messages } from './db.js'
 import { nextOccurrence, fastForward } from './recurrence.js'
 import { clients } from './clients.js'
+import { hasCredentials } from './whatsapp.js'
 
 // Moves a recurring series on from `row` unless it already has a pending row.
 // `nextSendAt(anchorSendAt)` picks the time; the anchor is the series' first
@@ -57,7 +58,13 @@ export function createScheduler({ registry, config = defaultConfig }) {
       const now = Date.now()
       for (const row of messages.due(now)) {
         const client = registry.get(row.owner_id)
-        if (!client?.connected) continue
+        if (!client) {
+          // A linked owner with no client (start failed earlier): start one; the
+          // 'connected' event re-runs the tick, so the row goes out then.
+          if (hasCredentials(config.authDirFor(row.owner_id))) registry.ensure(row.owner_id)
+          continue
+        }
+        if (!client.connected) continue
         if (!messages.claim(row.id)) continue
         const attempts = row.attempts + 1
         try {

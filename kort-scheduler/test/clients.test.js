@@ -95,6 +95,20 @@ test('a client left in qr without a status poll for 5 minutes is stopped; one po
   await registry.stopAll()
 })
 
+test('a linked client caught in connecting with a stale poll survives the sweep; an unlinked one next to it is stopped', async () => {
+  const { registry } = makeRegistry()
+  mkdirSync(config.authDirFor(14), { recursive: true }); writeFileSync(join(config.authDirFor(14), 'creds.json'), '{}')
+  const now = Date.now()
+  registry.ensure(14, now); registry.ensure(15, now)
+  await tick()
+  assert.equal(registry.get(14).status, 'connecting')
+  assert.equal(registry.get(14).linked, true)
+  registry.sweepIdle(now + 10 * 60_000)
+  assert.ok(registry.get(14), 'linked client kept while reconnecting')
+  assert.equal(registry.get(15), undefined, 'unlinked client stopped')
+  await registry.stopAll()
+})
+
 test('bootAll starts clients only for users with saved credentials', async () => {
   const { registry } = makeRegistry()
   mkdirSync(config.authDirFor(6), { recursive: true }); writeFileSync(join(config.authDirFor(6), 'creds.json'), '{}')
