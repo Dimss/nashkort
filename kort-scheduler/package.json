@@ -17,6 +17,7 @@
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "7.0.0-rc14",
     "express": "^5.1.0",
+    "openid-client": "^6.8.8",
     "pino": "^9.6.0",
     "qrcode": "^1.5.4"
   }
