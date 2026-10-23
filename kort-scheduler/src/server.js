@@ -91,6 +91,11 @@ function logAuthFailure(stage, err) {
   console.error(`[auth] ${stage} failed: ${parts.join(' ') || 'unknown error'}`)
 }
 
+// A refused callback names the check that refused it, never a token or a claim value.
+function logAuthRefusal(reason) {
+  console.warn(`[auth] callback refused: ${String(reason).replace(/[\r\n]+/g, ' ').slice(0, 200)}`)
+}
+
 // By subject; else adopt a subject-less row by email; else insert pending.
 // A different subject for a taken email is refused.
 function resolveAccount(sub, email) {
@@ -158,10 +163,18 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
 
     // The state cookie is checked before anything else, on both branches.
     const state = req.query.state
-    if (!pending || typeof state !== 'string' || state !== pending.state) return sendGenericErrorPage(res, lang)
+    if (!pending) {
+      logAuthRefusal('no sign-in cookie (expired, blocked, or the flow started on another host)')
+      return sendGenericErrorPage(res, lang)
+    }
+    if (typeof state !== 'string' || state !== pending.state) {
+      logAuthRefusal('state mismatch')
+      return sendGenericErrorPage(res, lang)
+    }
 
     if (req.query.error !== undefined) {
       if (req.query.error_description === EMAIL_NOT_VERIFIED) return sendConfirmEmailPage(res, lang)
+      logAuthRefusal(`provider error ${req.query.error}: ${req.query.error_description ?? ''}`)
       return sendGenericErrorPage(res, lang)
     }
 
@@ -175,7 +188,14 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
 
     const sub = claims.sub
     const email = normalizeEmail(typeof claims.email === 'string' ? claims.email : '')
-    if (typeof sub !== 'string' || !sub.startsWith(SUBJECT_PREFIX) || !email) return sendGenericErrorPage(res, lang)
+    if (typeof sub !== 'string' || !sub.startsWith(SUBJECT_PREFIX)) {
+      logAuthRefusal(`subject from connection "${typeof sub === 'string' ? sub.split('|')[0] : typeof sub}", only "${SUBJECT_PREFIX.slice(0, -1)}" is accepted`)
+      return sendGenericErrorPage(res, lang)
+    }
+    if (!email) {
+      logAuthRefusal('no email claim')
+      return sendGenericErrorPage(res, lang)
+    }
     if (claims.email_verified !== true) return sendConfirmEmailPage(res, lang)
 
     let user
@@ -185,7 +205,10 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
       logAuthFailure('account lookup', err)
       return sendGenericErrorPage(res, lang)
     }
-    if (!user) return sendGenericErrorPage(res, lang)
+    if (!user) {
+      logAuthRefusal('email already linked to a different subject')
+      return sendGenericErrorPage(res, lang)
+    }
 
     const hint = typeof claims.sid === 'string' ? claims.sid : null
     setSessionCookie(res, createSession(user.id, hint))
