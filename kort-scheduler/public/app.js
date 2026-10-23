@@ -206,13 +206,12 @@ async function api(path, opts) {
   return data
 }
 
+// Suggests ten minutes from now; any time from the current minute on is allowed.
 function setDefaultTime() {
-  const d = new Date(Date.now() + 10 * 60 * 1000)
-  d.setSeconds(0, 0)
   const pad = (n) => String(n).padStart(2, '0')
-  const v = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  if (!$('sendAt').value) $('sendAt').value = v
-  $('sendAt').min = v
+  const local = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  if (!$('sendAt').value) $('sendAt').value = local(new Date(Date.now() + 10 * 60 * 1000))
+  $('sendAt').min = local(new Date())
 }
 
 function renderGroups() {
