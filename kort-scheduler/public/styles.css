@@ -49,6 +49,21 @@
   .align-end { align-self: end; }
   .scroll-x { overflow-x: auto; }
   .st.missed { color: var(--muted); }
+  button.upcoming {
+    width: 18px; height: 18px; padding: 0; margin-left: 4px; border-radius: 50%; border: 1px solid var(--muted);
+    background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; line-height: 16px; cursor: help; vertical-align: 1px;
+  }
+  button.upcoming:hover, button.upcoming:focus-visible { background: var(--border); color: var(--text); }
+  .upcoming-tip {
+    position: fixed; z-index: 10; max-width: min(360px, calc(100vw - 32px)); padding: 10px 12px;
+    background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .18); font-size: 13px;
+  }
+  .upcoming-tip .tip-title { font-weight: 600; margin-bottom: 6px; }
+  .upcoming-tip ol { margin: 0; padding-left: 18px; }
+  .upcoming-tip li + li { margin-top: 6px; }
+  .upcoming-tip .tip-when { color: var(--muted); font-size: 12px; }
+  .upcoming-tip .tip-text { white-space: pre-wrap; word-break: break-word; }
   .nav-link { color: var(--text); font-size: 14px; text-decoration: underline; }
   form.inline { display: inline; margin: 0; }
 

@@ -1,4 +1,4 @@
-import { zonedParts, zonedTime } from '../public/template.js'
+import { zonedParts, zonedTime, renderTemplate } from '../public/template.js'
 
 export const REPEAT_RULES = new Set(['none', 'weekly', 'monthly'])
 
@@ -24,6 +24,18 @@ export function nextOccurrence(sendAt, repeat, anchorSendAt = sendAt, timeZone =
     return zonedTime({ ...anchor, year, month, day: Math.min(anchor.day, lastDay) }, timeZone) + (anchorSendAt % 1000)
   }
   return null
+}
+
+// The next `count` sends of a pending message, starting with its own, each
+// with the text as it goes out. A one-off message has just the one.
+export function upcomingSends({ sendAt, repeat, anchorSendAt = sendAt, message, timeZone }, count = 3) {
+  const sends = []
+  let t = sendAt
+  while (t != null && sends.length < count) {
+    sends.push({ sendAt: t, text: renderTemplate(message, t, timeZone) })
+    t = nextOccurrence(t, repeat, anchorSendAt, timeZone)
+  }
+  return sends
 }
 
 // Applies nextOccurrence from `sendAt` until the result lands strictly after

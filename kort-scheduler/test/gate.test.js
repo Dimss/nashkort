@@ -148,6 +148,22 @@ test('a template message is stored as typed with the app time zone, the list sho
   assert.equal(unknown.json().error, 'Unknown placeholder. Use {{day}}, {{month}} or {{year}}.')
 })
 
+test('the list gives a pending weekly row its next three sends with their text, and finished rows none', async () => {
+  const { session } = await signIn(srv.origin, issuer, verified('auth0|upcoming', 'upcoming@example.com'))
+  const user = users.findBySub('auth0|upcoming')
+  users.setState(user.id, 'approved')
+  const sendAt = Date.UTC(2030, 9, 25, 5, 0) // Fri 25 Oct 2030, 08:00 in Jerusalem
+  const weekly = await request(srv.origin, '/api/messages', { method: 'POST', body: { groupJid: 'g@g.us', message: '{{day}}.{{month}} 16:30', sendAt, repeat: 'weekly' }, ...asUser(session) })
+  assert.equal(weekly.status, 201)
+  const once = messages.create({ ownerId: user.id, groupJid: 'g@g.us', message: 'done', sendAt: Date.now() - 3600_000 })
+  messages.claim(once.id); messages.markSent(once.id)
+  const listed = (await request(srv.origin, '/api/messages', asUser(session))).json()
+  const row = listed.find((r) => r.id === weekly.json().id)
+  assert.deepEqual(row.upcoming.map((s) => s.text), ['01.11 16:30', '08.11 16:30', '15.11 16:30'])
+  assert.equal(row.upcoming[0].sendAt, sendAt)
+  assert.equal(listed.find((r) => r.id === once.id).upcoming, undefined)
+})
+
 test('origin rule: foreign Origin is rejected, cross-site fetch metadata without Origin is rejected, nothing at all passes', async () => {
   const { session } = await signIn(srv.origin, issuer, verified('auth0|poster', 'poster@example.com'))
   const user = users.findBySub('auth0|poster')

@@ -50,6 +50,7 @@ const TRANSLATIONS = {
     cancelBtn: 'Отменить',
     deleteBtn: 'Удалить',
     stPending: 'в очереди',
+    upcomingTitle: 'Следующие отправки',
     stSending: 'отправка…',
     stCancelled: 'отменено',
     stSent: 'отправлено {date}',
@@ -122,6 +123,7 @@ const TRANSLATIONS = {
     cancelBtn: 'Cancel',
     deleteBtn: 'Delete',
     stPending: 'pending',
+    upcomingTitle: 'Next sends',
     stSending: 'sending…',
     stCancelled: 'cancelled',
     stSent: 'sent {date}',
@@ -311,9 +313,20 @@ async function refreshStatus() {
   }
 }
 
+// Next sends of each pending row, by id, for the "?" popup.
+let upcomingById = new Map()
+let lastListKey = ''
+
 async function refreshList() {
   try {
     const rows = await api('/api/messages')
+    // Re-render only on a change (data, language, or the minute that decides "overdue"),
+    // so an open popup is not torn down by the 5-second refresh.
+    const key = `${lang}|${Math.floor(Date.now() / 60_000)}|${JSON.stringify(rows)}`
+    if (key === lastListKey) return
+    lastListKey = key
+    hideUpcoming()
+    upcomingById = new Map(rows.filter((r) => r.upcoming).map((r) => [String(r.id), r.upcoming]))
     const tbody = $('list')
     const pending = rows.filter((r) => r.status === 'pending' || r.status === 'sending').length
     $('count').textContent = rows.length ? t('countText', { pending, total: rows.length }) : ''
@@ -341,7 +354,7 @@ async function refreshList() {
         <td>${esc(r.group_name || r.group_jid)}</td>
         <td class="msg"${r.preview && r.preview !== r.message ? ` title="${esc(r.message)}"` : ''}>${esc(r.preview ?? r.message)}</td>
         <td>${esc(repeatText)}</td>
-        <td><span class="st ${r.status}">${statusText}</span></td>
+        <td><span class="st ${r.status}">${statusText}</span>${r.upcoming ? ` <button type="button" class="upcoming" data-upcoming="${r.id}" aria-label="${esc(t('upcomingTitle'))}" aria-describedby="upcomingTip">?</button>` : ''}</td>
         <td>${action}</td>
       </tr>`
     }).join('')
@@ -375,9 +388,54 @@ $('form').addEventListener('submit', async (e) => {
   }
 })
 
+function showUpcoming(button) {
+  const sends = upcomingById.get(button.dataset.upcoming)
+  if (!sends) return
+  const tip = $('upcomingTip')
+  const when = new Intl.DateTimeFormat(lang === 'ru' ? 'ru-RU' : 'en-US', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: zone })
+  tip.innerHTML = `<div class="tip-title">${esc(t('upcomingTitle'))}</div><ol>${sends.map((s) =>
+    `<li><div class="tip-when">${esc(when.format(s.sendAt))}</div><div class="tip-text">${esc(s.text)}</div></li>`).join('')}</ol>`
+  tip.hidden = false
+  // Below the button, kept inside the window; above it when there is no room below.
+  const b = button.getBoundingClientRect()
+  const left = Math.max(16, Math.min(b.left, window.innerWidth - tip.offsetWidth - 16))
+  const below = b.bottom + 6
+  const top = below + tip.offsetHeight > window.innerHeight - 8 ? Math.max(8, b.top - tip.offsetHeight - 6) : below
+  tip.style.left = `${left}px`
+  tip.style.top = `${top}px`
+}
+
+function hideUpcoming() {
+  $('upcomingTip').hidden = true
+}
+
+$('list').addEventListener('mouseover', (e) => {
+  const button = e.target.closest('button.upcoming')
+  if (button) showUpcoming(button)
+})
+$('list').addEventListener('mouseout', (e) => {
+  const button = e.target.closest('button.upcoming')
+  if (button && !button.contains(e.relatedTarget) && document.activeElement !== button) hideUpcoming()
+})
+$('list').addEventListener('focusin', (e) => {
+  if (e.target.matches('button.upcoming')) showUpcoming(e.target)
+})
+$('list').addEventListener('focusout', (e) => {
+  if (e.target.matches('button.upcoming')) hideUpcoming()
+})
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideUpcoming() })
+// Touch screens: a tap on "?" opens the popup, a tap anywhere else closes it.
+document.addEventListener('click', (e) => {
+  const button = e.target.closest?.('button.upcoming')
+  if (button) showUpcoming(button)
+  else if (!e.target.closest?.('#upcomingTip')) hideUpcoming()
+})
+window.addEventListener('scroll', hideUpcoming, { passive: true })
+
 $('list').addEventListener('click', async (e) => {
   const cancel = e.target.dataset.cancel
   const del = e.target.dataset.delete
+  if (!cancel && !del) return
   try {
     if (cancel) await api(`/api/messages/${cancel}/cancel`, { method: 'POST' })
     if (del) await api(`/api/messages/${del}`, { method: 'DELETE' })

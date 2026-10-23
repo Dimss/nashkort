@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { nextOccurrence, fastForward, REPEAT_RULES } from '../src/recurrence.js'
+import { nextOccurrence, fastForward, upcomingSends, REPEAT_RULES } from '../src/recurrence.js'
 import { zonedParts, zonedTime } from '../public/template.js'
 
 const TZ = 'Asia/Jerusalem'
@@ -55,4 +55,20 @@ test('fast-forward lands on the first occurrence after now', () => {
 test('non-repeating messages have no next occurrence', () => {
   assert.equal(nextOccurrence(at(2026, 1, 1), 'none', undefined, TZ), null)
   assert.deepEqual([...REPEAT_RULES].sort(), ['monthly', 'none', 'weekly'])
+})
+
+test('upcoming sends: a weekly message lists itself and the next two, each with its own text', () => {
+  const sends = upcomingSends({ sendAt: at(2026, 10, 30, 8), repeat: 'weekly', message: '{{day}}.{{month}} 16:30 - 18:00', timeZone: TZ })
+  assert.deepEqual(sends.map((s) => [wall(s.sendAt).day, wall(s.sendAt).month, wall(s.sendAt).hour, s.text]), [
+    [30, 10, 8, '06.11 16:30 - 18:00'],
+    [6, 11, 8, '13.11 16:30 - 18:00'],
+    [13, 11, 8, '20.11 16:30 - 18:00'],
+  ])
+})
+
+test('upcoming sends: monthly keeps the series anchor day; a one-off message has one send', () => {
+  const jan31 = at(2026, 1, 31)
+  const monthly = upcomingSends({ sendAt: at(2026, 2, 28), repeat: 'monthly', anchorSendAt: jan31, message: 'm', timeZone: TZ })
+  assert.deepEqual(monthly.map((s) => [wall(s.sendAt).month, wall(s.sendAt).day]), [[2, 28], [3, 31], [4, 30]])
+  assert.equal(upcomingSends({ sendAt: jan31, repeat: 'none', message: 'once', timeZone: TZ }).length, 1)
 })

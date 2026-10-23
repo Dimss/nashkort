@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { config, normalizeEmail } from './config.js'
 import { messages, sessions, users, transaction } from './db.js'
-import { REPEAT_RULES } from './recurrence.js'
+import { REPEAT_RULES, upcomingSends } from './recurrence.js'
 import { clients } from './clients.js'
 import { createOidc, EMAIL_NOT_VERIFIED, SUBJECT_PREFIXES, CALLBACK_PATH } from './oidc.js'
 import { accounts as defaultAccounts } from './accounts.js'
@@ -305,8 +305,19 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
   })
 
   app.get('/api/messages', (req, res) => {
-    // `preview` is the text as it goes out, with placeholders filled in.
-    res.json(messages.list(req.user.user_id).map((r) => ({ ...r, preview: renderTemplate(r.message, r.send_at, r.time_zone ?? config.timeZone) })))
+    // `preview` is the text as it goes out, with placeholders filled in; a
+    // pending row also lists its next sends (`upcoming`), the way the scheduler
+    // will compute them: monthly days follow the series' first row.
+    res.json(messages.list(req.user.user_id).map((r) => {
+      const timeZone = r.time_zone ?? config.timeZone
+      const row = { ...r, preview: renderTemplate(r.message, r.send_at, timeZone) }
+      if (r.status !== 'pending') return row
+      const anchor = r.series_id != null && r.series_id !== r.id ? messages.getById(r.series_id) : null
+      row.upcoming = upcomingSends({
+        sendAt: r.send_at, repeat: r.repeat_rule, anchorSendAt: anchor?.send_at ?? r.send_at, message: r.message, timeZone,
+      })
+      return row
+    }))
   })
 
   app.post('/api/messages', (req, res) => {
