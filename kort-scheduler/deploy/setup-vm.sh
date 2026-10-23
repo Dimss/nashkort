@@ -10,7 +10,7 @@
 # locks down the data directory, installs dependencies and the systemd units,
 # and starts both services.
 # Requires /etc/court-scheduler/env (see deploy/court-scheduler.env.example)
-# and /etc/cloudflared/env holding TUNNEL_TOKEN=<token from the Cloudflare dashboard>.
+# and /etc/cloudflared/token holding the tunnel token from the Cloudflare dashboard.
 set -euo pipefail
 
 ENV_FILE=/etc/court-scheduler/env
@@ -33,12 +33,12 @@ if ! sudo grep -qE '^BASE_URL=https://[^/]+$' "$ENV_FILE"; then
   echo "$ENV_FILE: BASE_URL must be https://<hostname> with no trailing slash" >&2
   exit 1
 fi
-TUNNEL_ENV=/etc/cloudflared/env
-if ! sudo grep -qE '^TUNNEL_TOKEN=.+' "$TUNNEL_ENV" 2>/dev/null; then
-  echo "Missing TUNNEL_TOKEN in $TUNNEL_ENV. Create the tunnel in the Cloudflare dashboard and write its token there." >&2
+TUNNEL_TOKEN_FILE=/etc/cloudflared/token
+if ! sudo test -s "$TUNNEL_TOKEN_FILE"; then
+  echo "Missing $TUNNEL_TOKEN_FILE. Create the tunnel in the Cloudflare dashboard and write its token there." >&2
   exit 1
 fi
-sudo chown root:root "$TUNNEL_ENV" && sudo chmod 0600 "$TUNNEL_ENV"
+sudo chown root:root "$TUNNEL_TOKEN_FILE" && sudo chmod 0600 "$TUNNEL_TOKEN_FILE"
 
 cd "$(dirname "$0")/.."
 
@@ -95,16 +95,16 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now court-scheduler
 sudo systemctl restart court-scheduler
 
-sudo cp deploy/court-scheduler-tunnel.service /etc/systemd/system/court-scheduler-tunnel.service
+sudo cp deploy/cloudflared.service /etc/systemd/system/cloudflared.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now court-scheduler-tunnel
-sudo systemctl restart court-scheduler-tunnel
+sudo systemctl enable --now cloudflared
+sudo systemctl restart cloudflared
 
 echo
 echo "Service status:"
 sudo systemctl status court-scheduler --no-pager
 echo
-sudo systemctl status court-scheduler-tunnel --no-pager
+sudo systemctl status cloudflared --no-pager
 echo
 echo "Open $(sudo sed -n 's/^BASE_URL=//p' "$ENV_FILE")/ once the tunnel shows HEALTHY in the Cloudflare dashboard."
 echo "Tail logs with: sudo journalctl -u court-scheduler -f"

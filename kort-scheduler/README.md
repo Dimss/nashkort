@@ -142,8 +142,8 @@ under an `https://` base URL, nosniff, same-origin referrer, deny framing). The
    sudo mkdir -p /etc/court-scheduler /etc/cloudflared
    sudo install -m 0600 -o root -g root /dev/null /etc/court-scheduler/env
    sudo nano /etc/court-scheduler/env     # paste deploy/court-scheduler.env.example, filled in
-   sudo install -m 0600 -o root -g root /dev/null /etc/cloudflared/env
-   sudo nano /etc/cloudflared/env         # one line: TUNNEL_TOKEN=<token>
+   sudo install -m 0600 -o root -g root /dev/null /etc/cloudflared/token
+   sudo nano /etc/cloudflared/token       # the tunnel token alone, nothing else
    ```
 
 4. **Sync and set up.** From your Mac, `./deploy/redeploy.sh` syncs the tree to `~/court-scheduler`
@@ -156,7 +156,8 @@ under an `https://` base URL, nosniff, same-origin referrer, deny framing). The
    This installs Node 24, a 2 GB swap file and `cloudflared`, removes the 80, 443 and 3000
    rules (and the old port-80 redirect) from the host firewall, sets the data directory to
    mode 0700, installs both systemd units (`deploy/court-scheduler.service`, which reads the
-   environment file, and `deploy/court-scheduler-tunnel.service`, which reads the token) and
+   environment file, and `deploy/cloudflared.service`, which reads the token; it replaces a unit installed by
+   `cloudflared service install` in place) and
    starts them.
 
 5. Once the tunnel shows Healthy in the dashboard, open `https://<hostname>/`, sign in, and scan the QR code.
@@ -224,7 +225,7 @@ The old code cannot start against the migrated schema, so back up first:
 **Rollback** before step 7. Never unpack over the migrated files: a leftover `scheduler.db-wal`
 next to the old database corrupts it.
 ```
-sudo systemctl stop court-scheduler court-scheduler-tunnel
+sudo systemctl stop court-scheduler cloudflared
 mv ~/court-scheduler/data ~/court-scheduler/data.failed
 tar xzf ~/court-scheduler-data-<date>.tgz -C ~/court-scheduler      # or: mkdir -m 700 ~/court-scheduler/data && cp ~/court-scheduler/data.failed/scheduler.pre-auth0.db ~/court-scheduler/data/scheduler.db
 tar xzf ~/court-scheduler-tree-<date>.tgz -C ~                        # or: rsync -a --delete --exclude node_modules --exclude data ~/court-scheduler-prev/ ~/court-scheduler/
