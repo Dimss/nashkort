@@ -119,41 +119,50 @@ must come from the app's own origin.
 ## Deploying
 
 This is one always-on Node process with a persistent local disk, so it needs a real
-host (not serverless). Production runs on an Oracle Cloud Always Free VM behind Caddy,
-which terminates HTTPS on a subdomain you own and proxies to the app on loopback. The
+host (not serverless). Production runs on an Oracle Cloud Always Free VM behind a
+Cloudflare Tunnel: Cloudflare terminates HTTPS for the hostname and reaches the app on
+127.0.0.1:3000 through an outbound connection from `cloudflared` on the VM, so the VM
+accepts no inbound web traffic at all. The app sets its own security headers (CSP, HSTS
+under an `https://` base URL, nosniff, same-origin referrer, deny framing). The
 `Dockerfile` and `fly.toml` are not the production path and predate the Auth0 login.
 
 ### One-time set-up on the Oracle VM
 
 1. **Auth0.** Complete the tenant checklist above with your public hostname as `BASE_URL`,
    and create your own account with the admin email.
-2. **DNS and network.** Create an A record for the hostname pointing at the VM's public IP.
-   In the Oracle console add ingress rules for TCP 80 and 443 on the VCN security list
-   (the host firewall is handled by the setup script).
-3. **Environment file** on the VM, as root:
+2. **Cloudflare Tunnel.** The domain's DNS must be on Cloudflare. In the dashboard,
+   Zero Trust → Networks → Tunnels → Create a tunnel (type Cloudflared), name it, and copy
+   the token from the install command. Under Public Hostname add the hostname with service
+   `http://localhost:3000`; delete any existing A record for that hostname first, because the
+   tunnel creates its own proxied CNAME. Set SSL/TLS → Edge Certificates → Always Use HTTPS on.
+   No Oracle ingress rules are needed beyond SSH; remove any for 80, 443 or 3000.
+3. **Environment files** on the VM, as root:
 
    ```bash
-   sudo mkdir -p /etc/court-scheduler
+   sudo mkdir -p /etc/court-scheduler /etc/cloudflared
    sudo install -m 0600 -o root -g root /dev/null /etc/court-scheduler/env
    sudo nano /etc/court-scheduler/env     # paste deploy/court-scheduler.env.example, filled in
+   sudo install -m 0600 -o root -g root /dev/null /etc/cloudflared/env
+   sudo nano /etc/cloudflared/env         # one line: TUNNEL_TOKEN=<token>
    ```
 
 4. **Sync and set up.** From your Mac, `./deploy/redeploy.sh` syncs the tree to `~/court-scheduler`
    on the VM. Then on the VM:
 
    ```bash
-   cd ~/court-scheduler && ./deploy/setup-vm.sh your.hostname.example
+   cd ~/court-scheduler && ./deploy/setup-vm.sh
    ```
 
-   This installs Node 24, a 2 GB swap file, Caddy with automatic HTTPS, opens 80 and 443
-   in the host firewall, closes 3000, sets the data directory to mode 0700, installs the
-   systemd unit (`deploy/court-scheduler.service`, which reads the environment file) and
-   starts the service.
+   This installs Node 24, a 2 GB swap file and `cloudflared`, removes the 80, 443 and 3000
+   rules (and the old port-80 redirect) from the host firewall, sets the data directory to
+   mode 0700, installs both systemd units (`deploy/court-scheduler.service`, which reads the
+   environment file, and `deploy/court-scheduler-tunnel.service`, which reads the token) and
+   starts them.
 
-5. Open `https://your.hostname.example/`, sign in, and scan the QR code.
+5. Once the tunnel shows Healthy in the dashboard, open `https://<hostname>/`, sign in, and scan the QR code.
 
 The SSH tunnel (`ssh -L 3000:localhost:3000 ubuntu@<vm-ip>`) still works as an
-administrative path; the app itself is only reachable through Caddy.
+administrative path; the app itself is only reachable through the Cloudflare Tunnel.
 
 ### Updating later
 
@@ -187,7 +196,7 @@ The old code cannot start against the migrated schema, so back up first:
    cd ~/court-scheduler && node -e 'const {DatabaseSync}=require("node:sqlite");console.log(new DatabaseSync("data/scheduler.db").prepare("SELECT id,email FROM users").all())'
    ```
    If it differs, fix the row first: `node -e '...prepare("UPDATE users SET email=? WHERE id=?").run("you@example.com", 1)'`.
-3. Create the environment file (step 3 above), then `DRY_RUN=1 ./deploy/redeploy.sh` and `./deploy/redeploy.sh`
+3. Create both environment files (step 3 above), then `DRY_RUN=1 ./deploy/redeploy.sh` and `./deploy/redeploy.sh`
    from your machine (it refuses to run until the environment file is complete and keeps the previous
    tree in `~/court-scheduler-prev`), then run the setup script on the VM.
 4. Sign in; your schedule is there; scan a fresh QR if the phone was not linked on the server.
@@ -215,7 +224,7 @@ The old code cannot start against the migrated schema, so back up first:
 **Rollback** before step 7. Never unpack over the migrated files: a leftover `scheduler.db-wal`
 next to the old database corrupts it.
 ```
-sudo systemctl stop court-scheduler caddy
+sudo systemctl stop court-scheduler court-scheduler-tunnel
 mv ~/court-scheduler/data ~/court-scheduler/data.failed
 tar xzf ~/court-scheduler-data-<date>.tgz -C ~/court-scheduler      # or: mkdir -m 700 ~/court-scheduler/data && cp ~/court-scheduler/data.failed/scheduler.pre-auth0.db ~/court-scheduler/data/scheduler.db
 tar xzf ~/court-scheduler-tree-<date>.tgz -C ~                        # or: rsync -a --delete --exclude node_modules --exclude data ~/court-scheduler-prev/ ~/court-scheduler/

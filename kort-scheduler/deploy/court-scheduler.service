@@ -19,7 +19,7 @@ EnvironmentFile=/etc/court-scheduler/env
 ExecStart=/usr/bin/node --no-warnings=ExperimentalWarning --max-old-space-size=512 src/index.js
 Restart=always
 RestartSec=5
-# On the 1 GB VM the app, not sshd or Caddy, is what gets killed under memory pressure.
+# On the 1 GB VM the app, not sshd or the tunnel, is what gets killed under memory pressure.
 MemoryMax=700M
 OOMScoreAdjust=500
 

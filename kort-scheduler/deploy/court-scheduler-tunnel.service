@@ -1,0 +1,22 @@
+# Cloudflare Tunnel: an outbound connection that carries https://<hostname> to the app on
+# 127.0.0.1:3000. The public hostname and its target are configured in the Cloudflare
+# dashboard (remotely managed tunnel); the token lives in /etc/cloudflared/env.
+[Unit]
+Description=Cloudflare Tunnel for the WhatsApp Scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+# TUNNEL_TOKEN=... (owner root, mode 0600)
+EnvironmentFile=/etc/cloudflared/env
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+Restart=on-failure
+RestartSec=5
+DynamicUser=yes
+NoNewPrivileges=true
+PrivateTmp=true
+MemoryMax=150M
+
+[Install]
+WantedBy=multi-user.target

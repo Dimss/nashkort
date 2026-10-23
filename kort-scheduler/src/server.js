@@ -129,6 +129,10 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
 
   app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy', CSP)
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Referrer-Policy', 'same-origin')
+    res.setHeader('X-Frame-Options', 'DENY')
+    if (config.baseUrl.startsWith('https://')) res.setHeader('Strict-Transport-Security', 'max-age=31536000')
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next()
     if (!sameOrigin(req)) return res.status(403).json({ error: 'Cross-site request refused.' })
     next()

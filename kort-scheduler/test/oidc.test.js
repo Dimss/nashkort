@@ -261,6 +261,8 @@ test('under an https base URL both cookies carry the __Host- prefix and the Secu
   process.env.BASE_URL = 'https://app.example'
   const secure = await startApp(createApp({ fetch: issuer.fetch }))
   try {
+    const root = await request(secure.origin, '/')
+    assert.equal(root.headers.get('strict-transport-security'), 'max-age=31536000')
     const { authParams, signInCookie } = await beginLogin(secure.origin, issuer)
     assert.equal(authParams.redirect_uri, 'https://app.example/auth/callback')
     assert.ok(signInCookie.name.startsWith('__Host-'), signInCookie.raw)
