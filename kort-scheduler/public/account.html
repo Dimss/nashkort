@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Планировщик WhatsApp</title>
+<link rel="stylesheet" href="/styles.css">
+<script src="/i18n.js" defer></script>
+<script src="/account.js" defer></script>
+</head>
+<body class="state-page" data-state="">
+<main>
+  <section class="card">
+    <h1>
+      <span data-i18n="title">Планировщик WhatsApp</span>
+      <select id="langSwitch" aria-label="Language">
+        <option value="ru">Русский</option>
+        <option value="en">English</option>
+      </select>
+    </h1>
+    <p id="stateText" class="hint"></p>
+    <p id="stateHint" class="hint"></p>
+    <div class="actions">
+      <form class="inline" method="post" action="/auth/logout"><button type="submit" class="secondary" data-i18n="signOut">Выйти</button></form>
+    </div>
+  </section>
+</main>
+</body>
+</html>

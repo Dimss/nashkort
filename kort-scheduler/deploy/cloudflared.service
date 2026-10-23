@@ -1,0 +1,22 @@
+# Cloudflare Tunnel: an outbound connection that carries https://<hostname> to the app on
+# 127.0.0.1:3000. The public hostname and its target are set in the Cloudflare dashboard
+# (remotely managed tunnel). The token is in /etc/cloudflared/token (owner root, mode 0600).
+# Same layout as `cloudflared service install`, so a tunnel installed from the dashboard is
+# replaced in place rather than duplicated.
+[Unit]
+Description=Cloudflare Tunnel client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+TimeoutStartSec=15
+Type=notify
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/token
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+MemoryMax=150M
+
+[Install]
+WantedBy=multi-user.target

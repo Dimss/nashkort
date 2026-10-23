@@ -1,0 +1,27 @@
+app = "court-scheduler"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "3000"
+  DATA_DIR = "/data"
+
+[[mounts]]
+  source = "court_scheduler_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Keep the single machine running permanently: Fly's default autoscaling
+  # suspends idle machines, which would kill the WhatsApp socket and the
+  # in-process scheduler loop that sends due messages.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

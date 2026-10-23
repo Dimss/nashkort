@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пользователи — Планировщик WhatsApp</title>
+<link rel="stylesheet" href="/styles.css">
+<script src="/i18n.js" defer></script>
+<script src="/admin.js" defer></script>
+</head>
+<body>
+<main>
+  <h1>
+    <span data-i18n="title">Пользователи</span>
+    <span class="spacer"></span>
+    <a class="nav-link" href="/" data-i18n="backLink">К расписанию</a>
+    <select id="langSwitch" aria-label="Language">
+      <option value="ru">Русский</option>
+      <option value="en">English</option>
+    </select>
+    <form class="inline" method="post" action="/auth/logout"><button type="submit" class="secondary" data-i18n="signOut">Выйти</button></form>
+  </h1>
+
+  <section class="card">
+    <p class="hint" data-i18n="intro">Новые пользователи появляются здесь после первого входа. Одобрите их, чтобы открыть доступ.</p>
+    <div class="scroll-x">
+      <table class="admin-table">
+        <thead><tr>
+          <th data-i18n="thEmail">Email</th>
+          <th data-i18n="thState">Статус</th>
+          <th data-i18n="thSignedUp">Зарегистрирован</th>
+          <th data-i18n="thLastSignIn">Последний вход</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="list"><tr><td colspan="5" class="hint" data-i18n="loading">Загрузка…</td></tr></tbody>
+      </table>
+    </div>
+    <p id="msg" class="msg"></p>
+  </section>
+</main>
+</body>
+</html>

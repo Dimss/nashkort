@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Планировщик WhatsApp</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main>
+  <h1>
+    <span data-i18n="appTitle">Планировщик WhatsApp</span>
+    <span id="status" class="badge">…</span>
+    <span class="spacer"></span>
+    <select id="langSwitch" aria-label="Language">
+      <option value="ru">Русский</option>
+      <option value="en">English</option>
+    </select>
+    <a id="adminLink" class="nav-link hidden" href="/admin" data-i18n="adminLink">Пользователи</a>
+    <form class="inline" method="post" action="/auth/logout"><button type="submit" class="secondary" data-i18n="accountLogoutBtn">Выйти</button></form>
+  </h1>
+
+  <section id="login" class="card hidden">
+    <h2 data-i18n="connectTitle">Подключение WhatsApp</h2>
+    <p class="hint" data-i18n="connectHint">На телефоне откройте WhatsApp → Настройки → Связанные устройства → Привязать устройство, затем отсканируйте этот код.</p>
+    <img id="qr" data-i18n-alt="qrAlt" alt="QR-код" class="hidden">
+    <p id="loginHint" class="hint"></p>
+  </section>
+
+  <section id="compose" class="card">
+    <h2 data-i18n="composeTitle">Запланировать сообщение</h2>
+    <form id="form">
+      <label for="groupFilter" data-i18n="groupLabel">Группа</label>
+      <div class="row">
+        <input type="text" id="groupFilter" data-i18n-placeholder="groupFilterPlaceholder" placeholder="Поиск групп…" autocomplete="off">
+        <select id="group" required><option value="" data-i18n="loadingGroups">Загрузка групп…</option></select>
+      </div>
+      <label for="message" data-i18n="messageLabel">Сообщение</label>
+      <textarea id="message" required maxlength="4096" data-i18n-placeholder="messagePlaceholder" placeholder="Введите текст сообщения…"></textarea>
+      <p class="hint" data-i18n="templateHint">{{day}}, {{month}} и {{year}} заменяются датой отправки, например: {{day}}.{{month}} 16:30 - 18:00</p>
+      <p class="hint" id="templatePreview" hidden></p>
+      <label for="sendAt" data-i18n="sendAtLabel">Время отправки</label>
+      <div class="row">
+        <input type="datetime-local" id="sendAt" required step="60">
+        <div class="hint align-end" id="tz"></div>
+      </div>
+      <label for="repeat" data-i18n="repeatLabel">Повтор</label>
+      <select id="repeat">
+        <option value="none" data-i18n="repeatNone">Не повторять</option>
+        <option value="weekly" data-i18n="repeatWeekly">Еженедельно</option>
+        <option value="monthly" data-i18n="repeatMonthly">Ежемесячно</option>
+      </select>
+      <p class="hint" data-i18n="repeatHint">Повторяющееся сообщение будет отправляться автоматически; следующая отправка появится в списке после текущей.</p>
+      <div class="actions">
+        <button type="submit" id="submit" data-i18n="scheduleBtn">Запланировать</button>
+        <button type="button" class="secondary" id="refreshGroups" data-i18n="refreshGroupsBtn">Обновить группы</button>
+        <span id="formMsg"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2><span data-i18n="scheduledTitle">Запланированные сообщения</span> <span id="count" class="count"></span></h2>
+    <div class="scroll-x">
+      <table>
+        <thead><tr>
+          <th data-i18n="thWhen">Когда</th>
+          <th data-i18n="thGroup">Группа</th>
+          <th data-i18n="thMessage">Сообщение</th>
+          <th data-i18n="thRepeat">Повтор</th>
+          <th data-i18n="thStatus">Статус</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="list"><tr><td colspan="6" class="hint" data-i18n="nothingScheduled">Пока ничего не запланировано.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button type="button" class="secondary" id="logout" data-i18n="logoutBtn">Выйти из WhatsApp</button>
+    <span class="hint" data-i18n="logoutHint">Выход очищает сохранённую сессию и показывает новый QR-код.</span>
+  </div>
+</main>
+
+<script src="/template.js" type="module"></script>
+<script src="/app.js" defer></script>
+</body>
+</html>
