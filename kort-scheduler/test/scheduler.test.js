@@ -116,7 +116,7 @@ test('a due row for a connected owner goes out through that owner\'s client and 
   assert.equal(cb.sent.length, 0)
 })
 
-test('a template row goes out with the date of its send time in its own time zone, and the next occurrence keeps the zone', async () => {
+test('a template row goes out with the date a week after its send time in its own time zone, and the next occurrence keeps the zone', async () => {
   const u = approvedUser()
   const registry = fakeRegistry()
   const client = registry.connect(u.id)
@@ -124,7 +124,7 @@ test('a template row goes out with the date of its send time in its own time zon
   const m = row(u.id, { message: '{{day}}.{{month}} 16:30', sendAt, timeZone: 'Pacific/Kiritimati', repeat: 'weekly' })
   await makeScheduler(registry).tick()
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Pacific/Kiritimati', day: '2-digit', month: '2-digit' })
-    .formatToParts(new Date(sendAt)).map((p) => [p.type, p.value]))
+    .formatToParts(new Date(sendAt + 7 * DAY)).map((p) => [p.type, p.value])) // Kiritimati has no daylight saving
   assert.deepEqual(client.sent, [['g@g.us', `${parts.day}.${parts.month} 16:30`]])
   const next = seriesRows(m.id).find((r) => r.status === 'pending')
   assert.equal(next.message, '{{day}}.{{month}} 16:30')

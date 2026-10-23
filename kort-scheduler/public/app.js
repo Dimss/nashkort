@@ -12,7 +12,7 @@ const TRANSLATIONS = {
     messageLabel: 'Сообщение',
     messagePlaceholder: 'Введите текст сообщения…',
     sendAtLabel: 'Время отправки',
-    templateHint: '{{day}}, {{month}} и {{year}} заменяются датой отправки, например: {{day}}.{{month}} 16:30 - 18:00',
+    templateHint: '{{day}}, {{month}} и {{year}} заменяются датой через неделю после отправки, например: {{day}}.{{month}} 16:30 - 18:00',
     templatePreview: 'Будет отправлено: {text}',
     errUnknownPlaceholder: 'Неизвестная подстановка. Используйте {{day}}, {{month}} или {{year}}.',
     timezonePrefix: 'Часовой пояс: ',
@@ -84,7 +84,7 @@ const TRANSLATIONS = {
     messageLabel: 'Message',
     messagePlaceholder: 'Type the message to send…',
     sendAtLabel: 'Send at',
-    templateHint: '{{day}}, {{month}} and {{year}} are replaced with the send date, for example: {{day}}.{{month}} 16:30 - 18:00',
+    templateHint: '{{day}}, {{month}} and {{year}} are replaced with the date one week after sending, for example: {{day}}.{{month}} 16:30 - 18:00',
     templatePreview: 'Will be sent as: {text}',
     errUnknownPlaceholder: 'Unknown placeholder. Use {{day}}, {{month}} or {{year}}.',
     timezonePrefix: 'Timezone: ',
@@ -231,7 +231,7 @@ async function api(path, opts) {
   return data
 }
 
-// Shows the message with {{day}}/{{month}}/{{year}} filled in for the chosen time.
+// Shows the message with {{day}}/{{month}}/{{year}} filled in (a week after the chosen time).
 function updateTemplatePreview() {
   const el = $('templatePreview')
   const text = $('message').value

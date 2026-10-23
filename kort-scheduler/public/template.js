@@ -1,9 +1,12 @@
 // Message templates and wall-clock time in a fixed time zone. {{day}},
-// {{month}} and {{year}} become the date of the scheduled send time in the
-// app's time zone (two-digit day and month, four-digit year). Shared by the
+// {{month}} and {{year}} become the date one week after the scheduled send
+// time, in the app's time zone (two-digit day and month, four-digit year): a
+// message sent on Friday 30 October announces the session on 06.11. Shared by the
 // server (sending, recurrence, message list) and the page (form, preview), so
 // both read and write times the same way.
 export const PLACEHOLDERS = ['day', 'month', 'year']
+// Calendar days from the send date to the date the placeholders show.
+export const TEMPLATE_DAYS_AHEAD = 7
 const TOKEN = /\{\{\s*([A-Za-z]+)\s*\}\}/g
 
 // Placeholder names in `text` that are not supported, as typed.
@@ -58,9 +61,11 @@ export function zonedTime({ year, month, day, hour = 0, minute = 0, second = 0 }
 export function renderTemplate(text, sendAt, timeZone) {
   if (!text.includes('{{')) return text
   const zone = isValidTimeZone(timeZone) ? timeZone : 'UTC'
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: zone, day: '2-digit', month: '2-digit', year: 'numeric' })
-    .formatToParts(new Date(sendAt))
-  const values = Object.fromEntries(parts.map((p) => [p.type, p.value]))
+  const sent = zonedParts(sendAt, zone)
+  // Rolls over month and year ends: 30.10 + 7 days is 06.11, 28.12 + 7 is 04.01 of the next year.
+  const shown = zonedParts(zonedTime({ ...sent, day: sent.day + TEMPLATE_DAYS_AHEAD }, zone), zone)
+  const pad = (n) => String(n).padStart(2, '0')
+  const values = { day: pad(shown.day), month: pad(shown.month), year: String(shown.year) }
   return text.replace(TOKEN, (match, name) => values[name.toLowerCase()] ?? match)
 }
 

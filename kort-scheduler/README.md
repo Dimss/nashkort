@@ -61,7 +61,7 @@ with a message naming the variable when missing.
 | `AUTH0_CLIENT_SECRET` | yes | | Its client secret. |
 | `PORT` | no | `3000` | Web UI port on 127.0.0.1. |
 | `DATA_DIR` | no | `./data` | Database and per-user WhatsApp credentials (`wa/<user id>/`). |
-| `TIME_ZONE` | no | `Asia/Jerusalem` | IANA zone for send times shown and entered in the form, repeat dates and `{{day}}`/`{{month}}`/`{{year}}`. |
+| `TIME_ZONE` | no | `Asia/Jerusalem` | IANA zone for send times shown and entered in the form, repeat dates and `{{day}}`/`{{month}}`/`{{year}}` (the date one week after sending). |
 | `WA_LOG_LEVEL` | no | `warn` | Baileys log level. |
 
 ### Auth0 tenant checklist
