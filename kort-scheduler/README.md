@@ -93,7 +93,7 @@ database connection or Google.
 
 - Messages are stored in SQLite (`data/scheduler.db`) and survive restarts.
 - If a user's phone is disconnected when a message is due, it stays pending and goes out as soon as the connection is back.
-- A failed send is retried up to 5 times, 30 seconds apart, then marked **failed** with the error.
+- A send that WhatsApp rejects is not retried: it is marked **failed** with the error at once. A repeating message still gets its next occurrence. (A disconnected phone is not a failure; see above.)
 - Pending messages can be cancelled; sent, failed, missed or cancelled ones can be deleted.
 - **Log out of WhatsApp** unlinks the user's own phone and shows a fresh QR code.
 - A WhatsApp connection is opened for a user at start-up only if they have saved credentials, otherwise when they open the app; an unlinked connection waiting for a scan is closed after 5 minutes without the page open.

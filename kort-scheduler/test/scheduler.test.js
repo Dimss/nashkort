@@ -188,7 +188,24 @@ test('a sent weekly row queues exactly one next occurrence, and none when the se
   assert.equal(rows.find((r) => r.status === 'pending').id, extra.id)
 })
 
-test('a send that keeps failing retries, then fails permanently', async () => {
+test('with the default settings a failed send is marked failed at once, not retried, and a weekly series moves on', async () => {
+  const u = approvedUser()
+  const registry = fakeRegistry()
+  const client = registry.connect(u.id, async () => { throw new Error('boom') })
+  const m = row(u.id, { repeat: 'weekly' })
+  const s = createScheduler({ registry, config: { ...config, tickMs: HOUR } })
+  await s.tick()
+  const after = messages.getById(m.id)
+  assert.equal(after.status, 'failed')
+  assert.equal(after.attempts, 1)
+  assert.equal(after.error, 'boom')
+  await s.tick()
+  assert.equal(client.sent.length, 1, 'no second attempt')
+  const next = seriesRows(m.id).find((r) => r.status === 'pending')
+  assert.equal(next.send_at, weeksLater(m.send_at))
+})
+
+test('with a higher attempt limit a failing send retries, then fails permanently', async () => {
   const u = approvedUser()
   const registry = fakeRegistry()
   registry.connect(u.id, async () => { throw new Error('boom') })

@@ -34,8 +34,9 @@ export const config = {
   get timeZone() { return process.env.TIME_ZONE || 'Asia/Jerusalem' },
   // How often the scheduler checks for due messages
   tickMs: 5000,
-  // Retry policy for failed sends
-  maxAttempts: 5,
+  // Retry policy for failed sends: one attempt, no retry. A failed send is
+  // marked failed at once; a repeating series still moves on to its next date.
+  maxAttempts: 1,
   retryDelayMs: 30_000,
   // Group list cache lifetime
   groupCacheMs: 60_000,
