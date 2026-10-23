@@ -66,9 +66,12 @@ with a message naming the variable when missing.
 ### Auth0 tenant checklist
 
 These are requirements, not suggestions; the app refuses subjects that are not from the
-database connection.
+database connection or Google.
 
-- One **database** connection (email and password), no social or other connections.
+- One **database** connection (email and password) and the **google-oauth2** social connection,
+  with your own Google OAuth client keys (Auth0's development keys are for testing only).
+  No other connections. One email belongs to one identity: someone who signed up with a
+  password cannot later sign in with Google under the same email, and the reverse.
 - A Regular Web Application with **Authorization Code** as the only grant.
 - Allowed Callback URLs: `<BASE_URL>/auth/callback`. Allowed Logout URLs: `<BASE_URL>/`.
   Allowed Web Origins: empty.

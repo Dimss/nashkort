@@ -6,7 +6,7 @@ import { config, normalizeEmail } from './config.js'
 import { messages, sessions, users, transaction } from './db.js'
 import { REPEAT_RULES } from './recurrence.js'
 import { clients } from './clients.js'
-import { createOidc, EMAIL_NOT_VERIFIED, SUBJECT_PREFIX, CALLBACK_PATH } from './oidc.js'
+import { createOidc, EMAIL_NOT_VERIFIED, SUBJECT_PREFIXES, CALLBACK_PATH } from './oidc.js'
 import { accounts as defaultAccounts } from './accounts.js'
 import {
   getCookie, readSession, createSession, setSessionCookie, clearSessionCookie, destroySession,
@@ -188,8 +188,8 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
 
     const sub = claims.sub
     const email = normalizeEmail(typeof claims.email === 'string' ? claims.email : '')
-    if (typeof sub !== 'string' || !sub.startsWith(SUBJECT_PREFIX)) {
-      logAuthRefusal(`subject from connection "${typeof sub === 'string' ? sub.split('|')[0] : typeof sub}", only "${SUBJECT_PREFIX.slice(0, -1)}" is accepted`)
+    if (typeof sub !== 'string' || !SUBJECT_PREFIXES.some((p) => sub.startsWith(p))) {
+      logAuthRefusal(`subject from connection "${typeof sub === 'string' ? sub.split('|')[0] : typeof sub}" is not accepted`)
       return sendGenericErrorPage(res, lang)
     }
     if (!email) {

@@ -119,14 +119,21 @@ test('AE10: an ID token with email_verified false renders the confirm page, crea
   assert.equal(signInCookieOf(res)?.cleared, true)
 })
 
+test('a Google subject with a new email creates a pending account and a session', async () => {
+  const { res, session } = await signIn(srv.origin, issuer, verified('google-oauth2|98765', 'google-user@example.com'))
+  assert.equal(res.status, 302)
+  assert.ok(session, 'session cookie set')
+  assert.equal(users.findBySub('google-oauth2|98765')?.state, 'pending')
+})
+
 test('a subject from another connection with the admin email creates nothing and sets no cookie', async () => {
   const before = { users: countUsers(), sessions: countSessions() }
-  const { res, session } = await signIn(srv.origin, issuer, verified('google-oauth2|12345', ADMIN))
+  const { res, session } = await signIn(srv.origin, issuer, verified('windowslive|12345', ADMIN))
   assert.ok(res.status >= 400 && res.status < 500, `status ${res.status}`)
   assert.ok(isBilingualWithLink(res.text))
   assert.equal(session, null)
   assert.deepEqual({ users: countUsers(), sessions: countSessions() }, before)
-  assert.equal(users.findBySub('google-oauth2|12345'), undefined)
+  assert.equal(users.findBySub('windowslive|12345'), undefined)
 })
 
 test('a callback with no email claim creates nothing', async () => {

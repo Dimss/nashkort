@@ -5,8 +5,8 @@ import * as client from 'openid-client'
 
 // The fixed reason an Auth0 post-login Action sets when it denies an unverified email.
 export const EMAIL_NOT_VERIFIED = 'email_not_verified'
-// Only subjects from the Auth0 database connection are accepted.
-export const SUBJECT_PREFIX = 'auth0|'
+// Subjects are accepted only from the Auth0 database connection and Google.
+export const SUBJECT_PREFIXES = ['auth0|', 'google-oauth2|']
 export const SCOPE = 'openid email'
 export const CALLBACK_PATH = '/auth/callback'
 
