@@ -30,6 +30,8 @@ export const config = {
     return path.join(WA_ROOT, String(userId))
   },
   waLogLevel: process.env.WA_LOG_LEVEL || 'warn',
+  // IANA zone for send times, recurrence and {{day}}/{{month}}/{{year}}.
+  get timeZone() { return process.env.TIME_ZONE || 'Asia/Jerusalem' },
   // How often the scheduler checks for due messages
   tickMs: 5000,
   // Retry policy for failed sends

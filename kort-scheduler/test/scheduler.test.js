@@ -4,6 +4,8 @@ import { EventEmitter } from 'node:events'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { freshData } from './helpers/tempdata.js'
+import { nextOccurrence } from '../src/recurrence.js'
+import { zonedTime } from '../public/template.js'
 
 let env, config, db, messages, users, database, transaction, createScheduler, sweepMissed
 
@@ -11,8 +13,11 @@ const MIN = 60_000
 const HOUR = 60 * MIN
 const DAY = 24 * HOUR
 const WEEK = 7 * DAY
-const local = (y, m, d, h = 10) => new Date(y, m - 1, d, h, 0, 0, 0).getTime()
+// Wall-clock time in the app's default zone, which recurrence counts in.
+const local = (year, month, day, hour = 10) => zonedTime({ year, month, day, hour }, 'Asia/Jerusalem')
 const settle = () => new Promise((r) => setTimeout(r, 20))
+// `n` weekly occurrences after `t` in the default app zone (a week is not always 7 x 24 h).
+const weeksLater = (t, n = 1) => { for (let i = 0; i < n; i++) t = nextOccurrence(t, 'weekly', t, 'Asia/Jerusalem'); return t }
 
 let seq = 0
 function approvedUser() {
@@ -171,7 +176,7 @@ test('a sent weekly row queues exactly one next occurrence, and none when the se
   let rows = seriesRows(first.id)
   assert.equal(rows.length, 2)
   assert.equal(rows[1].status, 'pending')
-  assert.equal(rows[1].send_at, first.send_at + WEEK)
+  assert.equal(rows[1].send_at, weeksLater(first.send_at))
   assert.equal(rows[1].owner_id, u.id)
   // Pull the follow-up back into the past so it is due while another pending row exists in the series.
   database.prepare('UPDATE scheduled_messages SET send_at = ? WHERE id = ?').run(Date.now() - MIN, rows[1].id)
@@ -241,7 +246,7 @@ test('AE11: a weekly row missed 16 days ago is replaced by one row at the first 
   assert.equal(rows[0].status, 'missed')
   const next = rows[1]
   assert.equal(next.status, 'pending')
-  assert.equal(next.send_at, missed.send_at + 3 * WEEK) // -16d -> -9d -> -2d -> +5d
+  assert.equal(next.send_at, weeksLater(missed.send_at, 3)) // -16d -> -9d -> -2d -> +5d
   assert.ok(next.send_at > now)
   assert.equal(next.series_id, missed.id)
   assert.equal(next.owner_id, u.id)
@@ -327,6 +332,6 @@ test('sweep then start: the connect tick finds nothing stale and leaves the futu
   assert.equal(messages.getById(future.id).status, 'pending')
   const next = rows.find((r) => r.id !== stale.id && r.id !== future.id)
   assert.equal(next.status, 'pending')
-  assert.equal(next.send_at, stale.send_at + WEEK)
+  assert.equal(next.send_at, weeksLater(stale.send_at))
   assert.equal(registry.events.listenerCount('connected'), 0)
 })

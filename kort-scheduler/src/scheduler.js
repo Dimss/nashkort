@@ -6,13 +6,13 @@ import { hasCredentials } from './whatsapp.js'
 import { renderTemplate } from '../public/template.js'
 
 // Moves a recurring series on from `row` unless it already has a pending row.
-// `nextSendAt(anchorSendAt)` picks the time; the anchor is the series' first
+// `nextSendAt(anchorSendAt, timeZone)` picks the time; the anchor is the series' first
 // row, or the finishing row itself when that first row was deleted.
 function requeueSeries(row, nextSendAt) {
   const seriesId = row.series_id ?? row.id
   if (messages.seriesHasPending(seriesId)) return null
   const anchor = messages.getById(seriesId)
-  const sendAt = nextSendAt(anchor?.send_at ?? row.send_at)
+  const sendAt = nextSendAt(anchor?.send_at ?? row.send_at, zoneOf(row))
   if (!sendAt) return null
   const next = messages.create({
     ownerId: row.owner_id,
@@ -22,14 +22,19 @@ function requeueSeries(row, nextSendAt) {
     sendAt,
     repeat: row.repeat_rule,
     seriesId,
-    timeZone: row.time_zone,
+    timeZone: zoneOf(row),
   })
   console.log(`[scheduler] queued next ${row.repeat_rule} occurrence #${next.id} for ${new Date(sendAt).toISOString()}`)
   return next
 }
 
+// Rows from before the time zone was stored use the configured one.
+function zoneOf(row) {
+  return row.time_zone ?? defaultConfig.timeZone
+}
+
 function scheduleNextOccurrence(row) {
-  requeueSeries(row, (anchorSendAt) => nextOccurrence(row.send_at, row.repeat_rule, anchorSendAt))
+  requeueSeries(row, (anchorSendAt, zone) => nextOccurrence(row.send_at, row.repeat_rule, anchorSendAt, zone))
 }
 
 // Resume step for a re-enabled owner: pending rows whose time has passed are
@@ -43,7 +48,7 @@ export function sweepMissed(ownerId, now = Date.now()) {
     missed++
     console.log(`[scheduler] #${row.id} missed: due ${new Date(row.send_at).toISOString()} while owner ${ownerId} was disabled`)
     if (row.repeat_rule === 'none') continue
-    if (requeueSeries(row, (anchorSendAt) => fastForward(row.send_at, row.repeat_rule, anchorSendAt, now))) scheduled++
+    if (requeueSeries(row, (anchorSendAt, zone) => fastForward(row.send_at, row.repeat_rule, anchorSendAt, now, zone))) scheduled++
   }
   return { missed, scheduled }
 }
@@ -70,7 +75,7 @@ export function createScheduler({ registry, config = defaultConfig }) {
         if (!messages.claim(row.id)) continue
         const attempts = row.attempts + 1
         try {
-          await client.sendText(row.group_jid, renderTemplate(row.message, row.send_at, row.time_zone))
+          await client.sendText(row.group_jid, renderTemplate(row.message, row.send_at, zoneOf(row)))
           messages.markSent(row.id)
           console.log(`[scheduler] sent #${row.id} to ${row.group_name ?? row.group_jid}`)
           if (row.repeat_rule !== 'none') scheduleNextOccurrence(row)

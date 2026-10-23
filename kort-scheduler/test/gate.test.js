@@ -50,7 +50,7 @@ test('pending: 403 with state on the API, 200 on /api/me, the pending page on /'
   assert.equal(typeof api.json().error, 'string')
   const me = await request(srv.origin, '/api/me', asUser(session))
   assert.equal(me.status, 200)
-  assert.deepEqual(me.json(), { email: 'pending@example.com', state: 'pending', isAdmin: false })
+  assert.deepEqual(me.json(), { email: 'pending@example.com', state: 'pending', isAdmin: false, timeZone: 'Asia/Jerusalem' })
   const page = await request(srv.origin, '/', asUser(session))
   assert.match(page.headers.get('content-type'), /text\/html/)
   assert.match(page.text, /data-state="pending"/)
@@ -69,7 +69,7 @@ test('AE2: a pending user approved in the database gets the app shell on the nex
   assert.equal(page.status, 200)
   assert.match(page.text, /id="langSwitch"/, 'app shell')
   const me = await request(srv.origin, '/api/me', asUser(session))
-  assert.deepEqual(me.json(), { email: 'approve@example.com', state: 'approved', isAdmin: false })
+  assert.deepEqual(me.json(), { email: 'approve@example.com', state: 'approved', isAdmin: false, timeZone: 'Asia/Jerusalem' })
 })
 
 test('AE7: a disabled user with a valid session gets 403 with state disabled, 200 on /api/me, and the disabled page on /', async () => {
@@ -122,7 +122,7 @@ test('AE4: a user whose sessions were deleted gets 401, is silently re-signed by
   assert.equal(users.findBySub('auth0|gone').id, user.id)
 })
 
-test('a template message is stored as typed with its time zone, the list shows it filled in, and an unknown placeholder is refused', async () => {
+test('a template message is stored as typed with the app time zone, the list shows it filled in, and an unknown placeholder is refused', async () => {
   const { session } = await signIn(srv.origin, issuer, verified('auth0|templ', 'templ@example.com'))
   const user = users.findBySub('auth0|templ')
   users.setState(user.id, 'approved')
@@ -137,9 +137,11 @@ test('a template message is stored as typed with its time zone, the list shows i
   const listed = (await request(srv.origin, '/api/messages', asUser(session))).json()
   assert.equal(listed[0].preview, '05.03 16:30 - 18:00')
 
-  const badZone = await request(srv.origin, '/api/messages', { method: 'POST', body: { ...body, timeZone: 'Mars/Olympus' }, ...asUser(session) })
-  assert.equal(badZone.status, 201)
-  assert.equal(badZone.json().time_zone, null)
+  // The app's zone is used whatever the browser sends.
+  const otherZone = await request(srv.origin, '/api/messages', { method: 'POST', body: { ...body, timeZone: 'America/New_York' }, ...asUser(session) })
+  assert.equal(otherZone.status, 201)
+  assert.equal(otherZone.json().time_zone, 'Asia/Jerusalem')
+  assert.equal(otherZone.json().preview, '05.03 16:30 - 18:00')
 
   const unknown = await request(srv.origin, '/api/messages', { method: 'POST', body: { ...body, message: '{{weekday}} 16:30' }, ...asUser(session) })
   assert.equal(unknown.status, 400)

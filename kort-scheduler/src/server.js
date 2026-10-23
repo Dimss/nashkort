@@ -8,7 +8,7 @@ import { REPEAT_RULES } from './recurrence.js'
 import { clients } from './clients.js'
 import { createOidc, EMAIL_NOT_VERIFIED, SUBJECT_PREFIXES, CALLBACK_PATH } from './oidc.js'
 import { accounts as defaultAccounts } from './accounts.js'
-import { renderTemplate, unknownPlaceholders, isValidTimeZone } from '../public/template.js'
+import { renderTemplate, unknownPlaceholders } from '../public/template.js'
 import {
   getCookie, readSession, createSession, setSessionCookie, clearSessionCookie, destroySession,
   setSignInCookie, readSignInCookie, clearSignInCookie,
@@ -259,7 +259,7 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
   })
 
   app.get('/api/me', (req, res) => {
-    res.json({ email: req.user.email, state: req.user.state, isAdmin: isAdmin(req.user) })
+    res.json({ email: req.user.email, state: req.user.state, isAdmin: isAdmin(req.user), timeZone: config.timeZone })
   })
 
   // The only routes that take an account id.
@@ -306,11 +306,11 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
 
   app.get('/api/messages', (req, res) => {
     // `preview` is the text as it goes out, with placeholders filled in.
-    res.json(messages.list(req.user.user_id).map((r) => ({ ...r, preview: renderTemplate(r.message, r.send_at, r.time_zone) })))
+    res.json(messages.list(req.user.user_id).map((r) => ({ ...r, preview: renderTemplate(r.message, r.send_at, r.time_zone ?? config.timeZone) })))
   })
 
   app.post('/api/messages', (req, res) => {
-    const { groupJid, groupName, message, sendAt, repeat, timeZone } = req.body ?? {}
+    const { groupJid, groupName, message, sendAt, repeat } = req.body ?? {}
     const text = typeof message === 'string' ? message.trim() : ''
     const when = Number(sendAt)
     const repeatRule = repeat === undefined || repeat === null || repeat === '' ? 'none' : repeat
@@ -338,7 +338,7 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
       message: text,
       sendAt: when,
       repeat: repeatRule,
-      timeZone: isValidTimeZone(timeZone) ? timeZone : null,
+      timeZone: config.timeZone,
     })
     res.status(201).json({ ...row, preview: renderTemplate(row.message, row.send_at, row.time_zone) })
   })

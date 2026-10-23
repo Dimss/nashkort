@@ -6,6 +6,12 @@ if (missing.length) {
   process.exit(1)
 }
 
+const { isValidTimeZone } = await import('../public/template.js')
+if (!isValidTimeZone(config.timeZone)) {
+  console.error('TIME_ZONE is not a valid IANA time zone')
+  process.exit(1)
+}
+
 // Loaded after validation so the database (which may need ADMIN_EMAIL to migrate) opens with the config present.
 const { bootstrap } = await import('./bootstrap.js')
 const { createApp } = await import('./server.js')

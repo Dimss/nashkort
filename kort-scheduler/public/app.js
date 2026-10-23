@@ -11,7 +11,7 @@ const TRANSLATIONS = {
     chooseGroup: '— выберите группу —',
     messageLabel: 'Сообщение',
     messagePlaceholder: 'Введите текст сообщения…',
-    sendAtLabel: 'Время отправки (по вашему местному времени)',
+    sendAtLabel: 'Время отправки',
     templateHint: '{{day}}, {{month}} и {{year}} заменяются датой отправки, например: {{day}}.{{month}} 16:30 - 18:00',
     templatePreview: 'Будет отправлено: {text}',
     errUnknownPlaceholder: 'Неизвестная подстановка. Используйте {{day}}, {{month}} или {{year}}.',
@@ -83,7 +83,7 @@ const TRANSLATIONS = {
     chooseGroup: '— choose a group —',
     messageLabel: 'Message',
     messagePlaceholder: 'Type the message to send…',
-    sendAtLabel: 'Send at (your local time)',
+    sendAtLabel: 'Send at',
     templateHint: '{{day}}, {{month}} and {{year}} are replaced with the send date, for example: {{day}}.{{month}} 16:30 - 18:00',
     templatePreview: 'Will be sent as: {text}',
     errUnknownPlaceholder: 'Unknown placeholder. Use {{day}}, {{month}} or {{year}}.',
@@ -183,7 +183,7 @@ function applyTranslations() {
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n) })
   document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => { el.placeholder = t(el.dataset.i18nPlaceholder) })
   document.querySelectorAll('[data-i18n-alt]').forEach((el) => { el.alt = t(el.dataset.i18nAlt) })
-  $('tz').textContent = t('timezonePrefix') + Intl.DateTimeFormat().resolvedOptions().timeZone
+  $('tz').textContent = t('timezonePrefix') + zone
   $('langSwitch').value = lang
   updateTemplatePreview()
   renderGroups()
@@ -192,7 +192,24 @@ function applyTranslations() {
 }
 
 const $ = (id) => document.getElementById(id)
-const fmt = () => new Intl.DateTimeFormat(lang === 'ru' ? 'ru-RU' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' })
+const fmt = () => new Intl.DateTimeFormat(lang === 'ru' ? 'ru-RU' : 'en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: zone })
+
+// Send times are shown and entered in the app's time zone (from /api/me), not the device's.
+let zone = 'Asia/Jerusalem'
+const pad = (n) => String(n).padStart(2, '0')
+
+// 'YYYY-MM-DDTHH:MM' in the app's zone, the format of the datetime-local input.
+function toInputValue(ms) {
+  const p = window.MessageTemplate.zonedParts(ms, zone)
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
+}
+
+function fromInputValue(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value)
+  if (!m) return NaN
+  const [year, month, day, hour, minute] = m.slice(1).map(Number)
+  return window.MessageTemplate.zonedTime({ year, month, day, hour, minute }, zone)
+}
 let groups = []
 let lastStatus = null
 let groupsLoadedFor = null
@@ -214,16 +231,12 @@ async function api(path, opts) {
   return data
 }
 
-function browserTimeZone() {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone
-}
-
 // Shows the message with {{day}}/{{month}}/{{year}} filled in for the chosen time.
 function updateTemplatePreview() {
   const el = $('templatePreview')
   const text = $('message').value
   const tpl = window.MessageTemplate
-  const sendAt = new Date($('sendAt').value).getTime()
+  const sendAt = tpl ? fromInputValue($('sendAt').value) : NaN
   if (!tpl || !text.includes('{{') || !Number.isFinite(sendAt)) {
     el.hidden = true
     return
@@ -231,15 +244,13 @@ function updateTemplatePreview() {
   el.hidden = false
   el.textContent = tpl.unknownPlaceholders(text).length
     ? t('errUnknownPlaceholder')
-    : t('templatePreview', { text: tpl.renderTemplate(text, sendAt, browserTimeZone()) })
+    : t('templatePreview', { text: tpl.renderTemplate(text, sendAt, zone) })
 }
 
 // Suggests ten minutes from now; any time from the current minute on is allowed.
 function setDefaultTime() {
-  const pad = (n) => String(n).padStart(2, '0')
-  const local = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  if (!$('sendAt').value) $('sendAt').value = local(new Date(Date.now() + 10 * 60 * 1000))
-  $('sendAt').min = local(new Date())
+  if (!$('sendAt').value) $('sendAt').value = toInputValue(Date.now() + 10 * 60 * 1000)
+  $('sendAt').min = toInputValue(Date.now())
 }
 
 function renderGroups() {
@@ -342,7 +353,7 @@ $('form').addEventListener('submit', async (e) => {
   const msg = $('formMsg')
   msg.className = ''; msg.textContent = ''
   const sel = $('group')
-  const sendAt = new Date($('sendAt').value).getTime()
+  const sendAt = fromInputValue($('sendAt').value)
   try {
     await api('/api/messages', {
       method: 'POST',
@@ -352,7 +363,6 @@ $('form').addEventListener('submit', async (e) => {
         message: $('message').value,
         sendAt,
         repeat: $('repeat').value,
-        timeZone: browserTimeZone(),
       }),
     })
     msg.className = 'ok'; msg.textContent = t('scheduledFor', { date: fmt().format(sendAt) })
@@ -395,6 +405,12 @@ async function loadMe() {
   try {
     const me = await api('/api/me')
     $('adminLink').classList.toggle('hidden', !me.isAdmin)
+    if (me.timeZone && me.timeZone !== zone) {
+      zone = me.timeZone
+      $('sendAt').value = ''
+      setDefaultTime()
+      applyTranslations()
+    }
   } catch {}
 }
 

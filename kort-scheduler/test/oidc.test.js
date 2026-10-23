@@ -175,7 +175,7 @@ test('first verified callback creates a pending user and a hashed session, then 
   // the fresh cookie is accepted
   const me = await request(srv.origin, '/api/me', { cookies: { [session.name]: session.value } })
   assert.equal(me.status, 200)
-  assert.deepEqual(me.json(), { email: 'first@example.com', state: 'pending', isAdmin: false })
+  assert.deepEqual(me.json(), { email: 'first@example.com', state: 'pending', isAdmin: false, timeZone: 'Asia/Jerusalem' })
 })
 
 test('the admin email after bootstrap attaches the subject to the approved row; no second row', async () => {
@@ -190,7 +190,7 @@ test('the admin email after bootstrap attaches the subject to the approved row; 
   assert.equal(row.id, admin.id)
   assert.equal(row.state, 'approved')
   const me = await request(srv.origin, '/api/me', { cookies: { [session.name]: session.value } })
-  assert.deepEqual(me.json(), { email: ADMIN, state: 'approved', isAdmin: true })
+  assert.deepEqual(me.json(), { email: ADMIN, state: 'approved', isAdmin: true, timeZone: 'Asia/Jerusalem' })
 })
 
 test('a legacy row with a non-admin email is adopted by the person signing in with that email, keeping its id', async () => {
