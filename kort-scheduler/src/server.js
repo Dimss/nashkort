@@ -137,6 +137,9 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'same-origin')
     res.setHeader('X-Frame-Options', 'DENY')
+    // Revalidate on every load (a 304 when unchanged), so a deploy shows up at once.
+    // Cloudflare's browser cache TTL does not override no-cache.
+    res.setHeader('Cache-Control', 'no-cache')
     if (config.baseUrl.startsWith('https://')) res.setHeader('Strict-Transport-Security', 'max-age=31536000')
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next()
     if (!sameOrigin(req)) return res.status(403).json({ error: 'Cross-site request refused.' })
@@ -231,17 +234,17 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
   app.get(['/', '/index.html'], (req, res) => {
     const session = readSession(req)
     if (!session) return res.redirect(302, LOGIN_PATH)
-    if (session.state === 'approved') return res.sendFile(path.join(PUBLIC_DIR, 'index.html'))
+    if (session.state === 'approved') return res.sendFile(path.join(PUBLIC_DIR, 'index.html'), { cacheControl: false })
     sendStatePage(res, session.state)
   })
   app.get(['/admin', '/admin.html'], (req, res) => {
     const session = readSession(req)
     if (!session) return res.redirect(302, LOGIN_PATH)
     if (!isAdmin(session)) return res.redirect(302, '/')
-    res.sendFile(path.join(PUBLIC_DIR, 'admin.html'))
+    res.sendFile(path.join(PUBLIC_DIR, 'admin.html'), { cacheControl: false })
   })
   app.get('/account.html', (_req, res) => res.redirect(302, '/'))
-  app.use(express.static(PUBLIC_DIR, { index: false }))
+  app.use(express.static(PUBLIC_DIR, { index: false, cacheControl: false }))
 
   app.use('/api', (req, res, next) => {
     const session = readSession(req)

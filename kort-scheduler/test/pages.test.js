@@ -23,6 +23,7 @@ function assertStrictHtml(res, label) {
   assert.equal(res.headers.get('referrer-policy'), 'same-origin', `${label} referrer policy`)
   assert.equal(res.headers.get('x-frame-options'), 'DENY', `${label} deny framing`)
   assert.equal(res.headers.get('strict-transport-security'), null, `${label} no HSTS over http`)
+  assert.equal(res.headers.get('cache-control'), 'no-cache', `${label} revalidates`)
   assert.doesNotMatch(res.text, /<script(?![^>]*\bsrc=)/i, `${label} has no inline script`)
   assert.doesNotMatch(res.text, /<style[\s>]/i, `${label} has no style element`)
   assert.doesNotMatch(res.text, /\sstyle=/i, `${label} has no style attribute`)
@@ -105,6 +106,7 @@ test('the app shell, the confirm-email page and the generic error page are stric
   for (const asset of ['/app.js', '/styles.css', '/account.js', '/admin.js', '/i18n.js']) {
     const a = await request(srv.origin, asset)
     assert.equal(a.status, 200, `${asset} is served`)
+    assert.equal(a.headers.get('cache-control'), 'no-cache', `${asset} revalidates`)
   }
 })
 
