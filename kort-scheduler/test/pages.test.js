@@ -103,7 +103,7 @@ test('the app shell, the confirm-email page and the generic error page are stric
   assertStrictHtml(confirm, 'confirm page')
   const generic = await request(srv.origin, '/auth/callback?error=server_error&state=nope')
   assertStrictHtml(generic, 'generic error page')
-  for (const asset of ['/app.js', '/styles.css', '/account.js', '/admin.js', '/i18n.js']) {
+  for (const asset of ['/app.js', '/template.js', '/styles.css', '/account.js', '/admin.js', '/i18n.js']) {
     const a = await request(srv.origin, asset)
     assert.equal(a.status, 200, `${asset} is served`)
     assert.equal(a.headers.get('cache-control'), 'no-cache', `${asset} revalidates`)
@@ -117,6 +117,7 @@ test('the page scripts translate every server error string the pages can receive
     'Message is too long (max 4096 characters).', 'Invalid date/time.', 'The scheduled time is in the past.',
     'Only pending messages can be cancelled.', 'Message not found.', 'Message is being sent right now.',
     'Invalid repeat option.', 'Internal error', 'Cross-site request refused.',
+    'Unknown placeholder. Use {{day}}, {{month}} or {{year}}.',
   ]
   for (const s of mainPageErrors) assert.ok(app.includes(`'${s}'`), `app.js maps "${s}"`)
   const admin = readFileSync(new URL('../public/admin.js', import.meta.url), 'utf8')

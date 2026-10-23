@@ -11,8 +11,8 @@ export const transaction = (fn) => runInTransaction(db, fn)
 
 const stmts = {
   insert: db.prepare(`
-    INSERT INTO scheduled_messages (owner_id, group_jid, group_name, message, send_at, repeat_rule, series_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_messages (owner_id, group_jid, group_name, message, send_at, repeat_rule, series_id, time_zone, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   setSeriesId: db.prepare(`UPDATE scheduled_messages SET series_id = ? WHERE id = ?`),
   list: db.prepare(`SELECT * FROM scheduled_messages WHERE owner_id = ? ORDER BY send_at DESC, id DESC LIMIT ?`),
@@ -72,9 +72,9 @@ function requireOwner(ownerId) {
 }
 
 export const messages = {
-  create({ ownerId, groupJid, groupName, message, sendAt, repeat = 'none', seriesId = null }) {
+  create({ ownerId, groupJid, groupName, message, sendAt, repeat = 'none', seriesId = null, timeZone = null }) {
     requireOwner(ownerId)
-    const r = stmts.insert.run(ownerId, groupJid, groupName ?? null, message, sendAt, repeat, seriesId, Date.now())
+    const r = stmts.insert.run(ownerId, groupJid, groupName ?? null, message, sendAt, repeat, seriesId, timeZone, Date.now())
     const id = Number(r.lastInsertRowid)
     // First occurrence of a new series: use its own id to identify the series.
     if (repeat !== 'none' && seriesId == null) stmts.setSeriesId.run(id, id)

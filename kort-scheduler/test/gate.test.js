@@ -122,6 +122,30 @@ test('AE4: a user whose sessions were deleted gets 401, is silently re-signed by
   assert.equal(users.findBySub('auth0|gone').id, user.id)
 })
 
+test('a template message is stored as typed with its time zone, the list shows it filled in, and an unknown placeholder is refused', async () => {
+  const { session } = await signIn(srv.origin, issuer, verified('auth0|templ', 'templ@example.com'))
+  const user = users.findBySub('auth0|templ')
+  users.setState(user.id, 'approved')
+  const sendAt = Date.UTC(2030, 2, 4, 22, 30) // already 5 March in Jerusalem
+  const body = { groupJid: 'g@g.us', groupName: 'G', message: '{{day}}.{{month}} 16:30 - 18:00', sendAt, timeZone: 'Asia/Jerusalem' }
+  const created = await request(srv.origin, '/api/messages', { method: 'POST', body, ...asUser(session) })
+  assert.equal(created.status, 201)
+  assert.equal(created.json().preview, '05.03 16:30 - 18:00')
+  const [stored] = messages.list(user.id)
+  assert.equal(stored.message, '{{day}}.{{month}} 16:30 - 18:00')
+  assert.equal(stored.time_zone, 'Asia/Jerusalem')
+  const listed = (await request(srv.origin, '/api/messages', asUser(session))).json()
+  assert.equal(listed[0].preview, '05.03 16:30 - 18:00')
+
+  const badZone = await request(srv.origin, '/api/messages', { method: 'POST', body: { ...body, timeZone: 'Mars/Olympus' }, ...asUser(session) })
+  assert.equal(badZone.status, 201)
+  assert.equal(badZone.json().time_zone, null)
+
+  const unknown = await request(srv.origin, '/api/messages', { method: 'POST', body: { ...body, message: '{{weekday}} 16:30' }, ...asUser(session) })
+  assert.equal(unknown.status, 400)
+  assert.equal(unknown.json().error, 'Unknown placeholder. Use {{day}}, {{month}} or {{year}}.')
+})
+
 test('origin rule: foreign Origin is rejected, cross-site fetch metadata without Origin is rejected, nothing at all passes', async () => {
   const { session } = await signIn(srv.origin, issuer, verified('auth0|poster', 'poster@example.com'))
   const user = users.findBySub('auth0|poster')

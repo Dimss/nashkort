@@ -37,6 +37,8 @@
       </div>
       <label for="message" data-i18n="messageLabel">Сообщение</label>
       <textarea id="message" required maxlength="4096" data-i18n-placeholder="messagePlaceholder" placeholder="Введите текст сообщения…"></textarea>
+      <p class="hint" data-i18n="templateHint">{{day}}, {{month}} и {{year}} заменяются датой отправки, например: {{day}}.{{month}} 16:30 - 18:00</p>
+      <p class="hint" id="templatePreview" hidden></p>
       <label for="sendAt" data-i18n="sendAtLabel">Время отправки (по вашему местному времени)</label>
       <div class="row">
         <input type="datetime-local" id="sendAt" required step="60">
@@ -80,6 +82,7 @@
   </div>
 </main>
 
+<script src="/template.js" type="module"></script>
 <script src="/app.js" defer></script>
 </body>
 </html>

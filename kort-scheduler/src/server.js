@@ -8,6 +8,7 @@ import { REPEAT_RULES } from './recurrence.js'
 import { clients } from './clients.js'
 import { createOidc, EMAIL_NOT_VERIFIED, SUBJECT_PREFIXES, CALLBACK_PATH } from './oidc.js'
 import { accounts as defaultAccounts } from './accounts.js'
+import { renderTemplate, unknownPlaceholders, isValidTimeZone } from '../public/template.js'
 import {
   getCookie, readSession, createSession, setSessionCookie, clearSessionCookie, destroySession,
   setSignInCookie, readSignInCookie, clearSignInCookie,
@@ -304,11 +305,12 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
   })
 
   app.get('/api/messages', (req, res) => {
-    res.json(messages.list(req.user.user_id))
+    // `preview` is the text as it goes out, with placeholders filled in.
+    res.json(messages.list(req.user.user_id).map((r) => ({ ...r, preview: renderTemplate(r.message, r.send_at, r.time_zone) })))
   })
 
   app.post('/api/messages', (req, res) => {
-    const { groupJid, groupName, message, sendAt, repeat } = req.body ?? {}
+    const { groupJid, groupName, message, sendAt, repeat, timeZone } = req.body ?? {}
     const text = typeof message === 'string' ? message.trim() : ''
     const when = Number(sendAt)
     const repeatRule = repeat === undefined || repeat === null || repeat === '' ? 'none' : repeat
@@ -319,6 +321,9 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     if (!text) return res.status(400).json({ error: 'Message cannot be empty.' })
     if (text.length > MAX_MESSAGE_LENGTH) {
       return res.status(400).json({ error: `Message is too long (max ${MAX_MESSAGE_LENGTH} characters).` })
+    }
+    if (unknownPlaceholders(text).length) {
+      return res.status(400).json({ error: 'Unknown placeholder. Use {{day}}, {{month}} or {{year}}.' })
     }
     if (!Number.isFinite(when)) return res.status(400).json({ error: 'Invalid date/time.' })
     if (when < Date.now() - 60_000) {
@@ -333,8 +338,9 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
       message: text,
       sendAt: when,
       repeat: repeatRule,
+      timeZone: isValidTimeZone(timeZone) ? timeZone : null,
     })
-    res.status(201).json(row)
+    res.status(201).json({ ...row, preview: renderTemplate(row.message, row.send_at, row.time_zone) })
   })
 
   app.post('/api/messages/:id/cancel', (req, res) => {

@@ -3,6 +3,7 @@ import { messages } from './db.js'
 import { nextOccurrence, fastForward } from './recurrence.js'
 import { clients } from './clients.js'
 import { hasCredentials } from './whatsapp.js'
+import { renderTemplate } from '../public/template.js'
 
 // Moves a recurring series on from `row` unless it already has a pending row.
 // `nextSendAt(anchorSendAt)` picks the time; the anchor is the series' first
@@ -21,6 +22,7 @@ function requeueSeries(row, nextSendAt) {
     sendAt,
     repeat: row.repeat_rule,
     seriesId,
+    timeZone: row.time_zone,
   })
   console.log(`[scheduler] queued next ${row.repeat_rule} occurrence #${next.id} for ${new Date(sendAt).toISOString()}`)
   return next
@@ -68,7 +70,7 @@ export function createScheduler({ registry, config = defaultConfig }) {
         if (!messages.claim(row.id)) continue
         const attempts = row.attempts + 1
         try {
-          await client.sendText(row.group_jid, row.message)
+          await client.sendText(row.group_jid, renderTemplate(row.message, row.send_at, row.time_zone))
           messages.markSent(row.id)
           console.log(`[scheduler] sent #${row.id} to ${row.group_name ?? row.group_jid}`)
           if (row.repeat_rule !== 'none') scheduleNextOccurrence(row)

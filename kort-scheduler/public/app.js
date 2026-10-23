@@ -12,6 +12,9 @@ const TRANSLATIONS = {
     messageLabel: 'Сообщение',
     messagePlaceholder: 'Введите текст сообщения…',
     sendAtLabel: 'Время отправки (по вашему местному времени)',
+    templateHint: '{{day}}, {{month}} и {{year}} заменяются датой отправки, например: {{day}}.{{month}} 16:30 - 18:00',
+    templatePreview: 'Будет отправлено: {text}',
+    errUnknownPlaceholder: 'Неизвестная подстановка. Используйте {{day}}, {{month}} или {{year}}.',
     timezonePrefix: 'Часовой пояс: ',
     repeatLabel: 'Повтор',
     repeatNone: 'Не повторять',
@@ -81,6 +84,9 @@ const TRANSLATIONS = {
     messageLabel: 'Message',
     messagePlaceholder: 'Type the message to send…',
     sendAtLabel: 'Send at (your local time)',
+    templateHint: '{{day}}, {{month}} and {{year}} are replaced with the send date, for example: {{day}}.{{month}} 16:30 - 18:00',
+    templatePreview: 'Will be sent as: {text}',
+    errUnknownPlaceholder: 'Unknown placeholder. Use {{day}}, {{month}} or {{year}}.',
     timezonePrefix: 'Timezone: ',
     repeatLabel: 'Repeat',
     repeatNone: "Don't repeat",
@@ -153,6 +159,7 @@ const SERVER_ERROR_KEYS = {
   'Message is being sent right now.': 'errMessageSending',
   'Cross-site request refused.': 'errCrossSite',
   'Invalid repeat option.': 'errInvalidRepeat',
+  'Unknown placeholder. Use {{day}}, {{month}} or {{year}}.': 'errUnknownPlaceholder',
   'Internal error': 'errInternal',
 }
 
@@ -178,6 +185,7 @@ function applyTranslations() {
   document.querySelectorAll('[data-i18n-alt]').forEach((el) => { el.alt = t(el.dataset.i18nAlt) })
   $('tz').textContent = t('timezonePrefix') + Intl.DateTimeFormat().resolvedOptions().timeZone
   $('langSwitch').value = lang
+  updateTemplatePreview()
   renderGroups()
   refreshStatus()
   refreshList()
@@ -204,6 +212,26 @@ async function api(path, opts) {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(translateServerError(data.error) || res.statusText)
   return data
+}
+
+function browserTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+// Shows the message with {{day}}/{{month}}/{{year}} filled in for the chosen time.
+function updateTemplatePreview() {
+  const el = $('templatePreview')
+  const text = $('message').value
+  const tpl = window.MessageTemplate
+  const sendAt = new Date($('sendAt').value).getTime()
+  if (!tpl || !text.includes('{{') || !Number.isFinite(sendAt)) {
+    el.hidden = true
+    return
+  }
+  el.hidden = false
+  el.textContent = tpl.unknownPlaceholders(text).length
+    ? t('errUnknownPlaceholder')
+    : t('templatePreview', { text: tpl.renderTemplate(text, sendAt, browserTimeZone()) })
 }
 
 // Suggests ten minutes from now; any time from the current minute on is allowed.
@@ -300,7 +328,7 @@ async function refreshList() {
       return `<tr>
         <td>${fmt().format(r.send_at)}</td>
         <td>${esc(r.group_name || r.group_jid)}</td>
-        <td class="msg">${esc(r.message)}</td>
+        <td class="msg"${r.preview && r.preview !== r.message ? ` title="${esc(r.message)}"` : ''}>${esc(r.preview ?? r.message)}</td>
         <td>${esc(repeatText)}</td>
         <td><span class="st ${r.status}">${statusText}</span></td>
         <td>${action}</td>
@@ -324,11 +352,13 @@ $('form').addEventListener('submit', async (e) => {
         message: $('message').value,
         sendAt,
         repeat: $('repeat').value,
+        timeZone: browserTimeZone(),
       }),
     })
     msg.className = 'ok'; msg.textContent = t('scheduledFor', { date: fmt().format(sendAt) })
     $('message').value = ''
     $('repeat').value = 'none'
+    updateTemplatePreview()
     refreshList()
   } catch (err) {
     msg.className = 'error'; msg.textContent = err.message
@@ -346,6 +376,8 @@ $('list').addEventListener('click', async (e) => {
 })
 
 $('groupFilter').addEventListener('input', renderGroups)
+$('message').addEventListener('input', updateTemplatePreview)
+$('sendAt').addEventListener('input', updateTemplatePreview)
 $('refreshGroups').addEventListener('click', () => loadGroups(true))
 $('logout').addEventListener('click', async () => {
   if (!confirm(t('logoutConfirm'))) return

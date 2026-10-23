@@ -96,6 +96,8 @@ export function openDatabase(dbPath, { adminEmail, backupPath } = {}) {
   for (const stmt of [
     `ALTER TABLE scheduled_messages ADD COLUMN repeat_rule TEXT NOT NULL DEFAULT 'none'`,
     `ALTER TABLE scheduled_messages ADD COLUMN series_id INTEGER`,
+    // IANA zone of the sender's browser; {{day}}/{{month}}/{{year}} are rendered in it.
+    `ALTER TABLE scheduled_messages ADD COLUMN time_zone TEXT`,
   ]) {
     try { db.exec(stmt) } catch (err) { if (!/duplicate column/i.test(err.message)) throw err }
   }
