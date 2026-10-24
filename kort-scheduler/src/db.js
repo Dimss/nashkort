@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events'
 import { config, normalizeEmail } from './config.js'
 import { openDatabase, runInTransaction, UPSERT_ADMIN_SQL } from './migrations.js'
 
@@ -24,6 +25,15 @@ const stmts = {
     WHERE m.status = 'pending' AND u.state = 'approved'
       AND m.send_at <= ? AND (m.next_attempt_at IS NULL OR m.next_attempt_at <= ?)
     ORDER BY m.send_at ASC
+  `),
+  // When the earliest pending row of an approved owner becomes sendable, counting
+  // only times after now. Rows already due but blocked (owner offline) are left
+  // to the poll and the 'connected' event, so the timer never spins on them.
+  nextWake: db.prepare(`
+    SELECT MIN(MAX(m.send_at, COALESCE(m.next_attempt_at, 0))) AS at FROM scheduled_messages m
+    JOIN users u ON u.id = m.owner_id
+    WHERE m.status = 'pending' AND u.state = 'approved'
+      AND MAX(m.send_at, COALESCE(m.next_attempt_at, 0)) > ?
   `),
   claim: db.prepare(`
     UPDATE scheduled_messages SET status = 'sending'
@@ -71,14 +81,20 @@ function requireOwner(ownerId) {
   return ownerId
 }
 
+// 'created' fires with each new row, so the scheduler can move its timer earlier.
+const messageEvents = new EventEmitter()
+
 export const messages = {
+  events: messageEvents,
   create({ ownerId, groupJid, groupName, message, sendAt, repeat = 'none', seriesId = null, timeZone = null }) {
     requireOwner(ownerId)
     const r = stmts.insert.run(ownerId, groupJid, groupName ?? null, message, sendAt, repeat, seriesId, timeZone, Date.now())
     const id = Number(r.lastInsertRowid)
     // First occurrence of a new series: use its own id to identify the series.
     if (repeat !== 'none' && seriesId == null) stmts.setSeriesId.run(id, id)
-    return stmts.getById.get(id)
+    const row = stmts.getById.get(id)
+    messageEvents.emit('created', row)
+    return row
   },
   list(ownerId, limit = 200) {
     return stmts.list.all(requireOwner(ownerId), limit)
@@ -91,6 +107,9 @@ export const messages = {
   },
   due(now = Date.now()) {
     return stmts.due.all(now, now)
+  },
+  nextWakeAfter(now = Date.now()) {
+    return stmts.nextWake.get(now)?.at ?? null
   },
   claim(id) {
     return stmts.claim.run(id).changes === 1

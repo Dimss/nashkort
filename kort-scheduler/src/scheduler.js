@@ -53,10 +53,29 @@ export function sweepMissed(ownerId, now = Date.now()) {
   return { missed, scheduled }
 }
 
+// setTimeout fires at once for delays above about 24.8 days; longer waits are
+// split and re-armed when they expire.
+const MAX_DELAY_MS = 2 ** 31 - 1
+
+// Sends are driven by a timer set for the next row's exact send time, re-armed
+// after every tick and whenever a row is created. The `tickMs` poll stays as a
+// backstop for rows that came due while their owner was offline.
 export function createScheduler({ registry, config = defaultConfig }) {
   let timer = null
+  let wakeTimer = null
   let running = false
   let onConnected = null
+  let onCreated = null
+
+  function arm() {
+    clearTimeout(wakeTimer)
+    wakeTimer = null
+    if (!timer) return
+    const now = Date.now()
+    const at = messages.nextWakeAfter(now)
+    if (at == null) return
+    wakeTimer = setTimeout(tick, Math.min(at - now, MAX_DELAY_MS))
+  }
 
   async function tick() {
     if (running) return
@@ -95,6 +114,7 @@ export function createScheduler({ registry, config = defaultConfig }) {
       console.error('[scheduler] tick error', err)
     } finally {
       running = false
+      arm()
     }
   }
 
@@ -104,13 +124,20 @@ export function createScheduler({ registry, config = defaultConfig }) {
       timer = setInterval(tick, config.tickMs)
       onConnected = () => tick()
       registry.events.on('connected', onConnected)
+      // A tick in progress re-arms when it finishes, after its own new rows.
+      onCreated = () => { if (!running) arm() }
+      messages.events.on('created', onCreated)
       tick()
     },
     stop() {
       clearInterval(timer)
       timer = null
+      clearTimeout(wakeTimer)
+      wakeTimer = null
       if (onConnected) registry.events.off('connected', onConnected)
+      if (onCreated) messages.events.off('created', onCreated)
       onConnected = null
+      onCreated = null
     },
     tick,
   }

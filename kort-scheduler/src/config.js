@@ -32,7 +32,8 @@ export const config = {
   waLogLevel: process.env.WA_LOG_LEVEL || 'warn',
   // IANA zone for send times, recurrence and {{day}}/{{month}}/{{year}}.
   get timeZone() { return process.env.TIME_ZONE || 'Asia/Jerusalem' },
-  // How often the scheduler checks for due messages
+  // Backstop poll for due messages; sends normally go out on a timer set for
+  // the exact send time (see scheduler.js)
   tickMs: 5000,
   // Retry policy for failed sends: one attempt, no retry. A failed send is
   // marked failed at once; a repeating series still moves on to its next date.

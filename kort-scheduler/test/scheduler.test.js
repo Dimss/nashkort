@@ -352,3 +352,71 @@ test('sweep then start: the connect tick finds nothing stale and leaves the futu
   assert.equal(next.send_at, weeksLater(stale.send_at))
   assert.equal(registry.events.listenerCount('connected'), 0)
 })
+
+// --- exact wake timer -----------------------------------------------------
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+
+test('a future row goes out at its send time, not at the next poll', async () => {
+  const u = approvedUser()
+  const sendAt = Date.now() + 150
+  const r = row(u.id, { sendAt })
+  const registry = fakeRegistry()
+  let sentAt = null
+  registry.connect(u.id, async () => { sentAt = Date.now() })
+  const s = makeScheduler(registry) // poll every hour: only the timer can send it
+  s.start()
+  await wait(400)
+  s.stop()
+  assert.equal(messages.getById(r.id).status, 'sent')
+  assert.ok(sentAt >= sendAt, 'not before its time')
+  assert.ok(sentAt - sendAt < 200, `sent ${sentAt - sendAt} ms late`)
+})
+
+test('a row created after start moves the timer earlier', async () => {
+  const u = approvedUser()
+  const registry = fakeRegistry()
+  const client = registry.connect(u.id)
+  const later = row(u.id, { sendAt: Date.now() + DAY })
+  const s = makeScheduler(registry)
+  s.start()
+  await settle()
+  const soon = row(u.id, { sendAt: Date.now() + 100 })
+  await wait(300)
+  s.stop()
+  assert.equal(messages.getById(soon.id).status, 'sent')
+  assert.equal(messages.getById(later.id).status, 'pending')
+  assert.equal(client.sent.length, 1)
+})
+
+test('a due row of an offline owner does not make the timer spin', async () => {
+  const u = approvedUser()
+  const r = row(u.id)
+  const registry = fakeRegistry()
+  registry.disconnect(u.id)
+  let gets = 0
+  const get = registry.get.bind(registry)
+  registry.get = (id) => { if (id === u.id) gets++; return get(id) }
+  const s = makeScheduler(registry)
+  s.start()
+  await wait(200)
+  s.stop()
+  assert.equal(gets, 1, 'only the start tick looked at it')
+  assert.equal(messages.getById(r.id).status, 'pending')
+})
+
+test('stop clears the timer and the created listener', async () => {
+  const u = approvedUser()
+  const r = row(u.id, { sendAt: Date.now() + 80 })
+  const registry = fakeRegistry()
+  const client = registry.connect(u.id)
+  const s = makeScheduler(registry)
+  s.start()
+  await settle()
+  s.stop()
+  await wait(200)
+  assert.equal(client.sent.length, 0)
+  assert.equal(messages.getById(r.id).status, 'pending')
+  assert.equal(messages.events.listenerCount('created'), 0)
+  messages.cancel(r.id, u.id)
+})
