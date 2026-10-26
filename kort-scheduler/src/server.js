@@ -8,6 +8,7 @@ import { REPEAT_RULES, upcomingSends } from './recurrence.js'
 import { clients } from './clients.js'
 import { createOidc, EMAIL_NOT_VERIFIED, SUBJECT_PREFIXES, CALLBACK_PATH } from './oidc.js'
 import { accounts as defaultAccounts } from './accounts.js'
+import { versionAssetLinks } from './assets.js'
 import { renderTemplate, unknownPlaceholders } from '../public/template.js'
 import {
   getCookie, readSession, createSession, setSessionCookie, clearSessionCookie, destroySession,
@@ -22,6 +23,15 @@ const LOGOUT_PATH = '/auth/logout'
 const LANGS = new Set(['ru', 'en'])
 const CSP = "default-src 'self'; frame-ancestors 'none'; img-src 'self' data:"
 const ACCOUNT_PAGE = fs.readFileSync(path.join(PUBLIC_DIR, 'account.html'), 'utf8')
+
+// Sends a page with versioned links to its scripts and styles (see assets.js).
+function sendHtml(res, html, status = 200) {
+  res.status(status).type('html').send(versionAssetLinks(html, PUBLIC_DIR))
+}
+
+function sendPublicPage(res, file) {
+  sendHtml(res, fs.readFileSync(path.join(PUBLIC_DIR, file), 'utf8'))
+}
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
@@ -45,29 +55,29 @@ ${link}
 }
 
 function sendGenericErrorPage(res, lang) {
-  res.status(400).type('html').send(page({
+  sendHtml(res, page({
     lang,
     title: 'Ошибка входа / Sign-in error',
     ru: 'Не удалось выполнить вход. Попробуйте ещё раз.',
     en: 'Sign-in did not complete. Please try again.',
     signInAgain: true,
-  }))
+  }), 400)
 }
 
 function sendConfirmEmailPage(res, lang) {
-  res.status(403).type('html').send(page({
+  sendHtml(res, page({
     lang,
     title: 'Подтвердите почту / Confirm your email',
     ru: 'Подтвердите адрес электронной почты по ссылке из письма, затем войдите снова.',
     en: 'Please confirm your email address using the link we sent you, then sign in again.',
     signInAgain: true,
-  }))
+  }), 403)
 }
 
 function sendStatePage(res, state) {
   // Only this allowlisted token is injected, never anything about the person.
   const token = state === 'pending' ? 'pending' : 'disabled'
-  res.status(200).type('html').send(ACCOUNT_PAGE.replace('data-state=""', `data-state="${token}"`))
+  sendHtml(res, ACCOUNT_PAGE.replace('data-state=""', `data-state="${token}"`))
 }
 
 function pickLang(req) {
@@ -138,8 +148,9 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'same-origin')
     res.setHeader('X-Frame-Options', 'DENY')
-    // Revalidate on every load (a 304 when unchanged), so a deploy shows up at once.
-    // Cloudflare's browser cache TTL does not override no-cache.
+    // Revalidate on every load (a 304 when unchanged). Cloudflare keeps this for pages
+    // but rewrites it to max-age=14400 on .js and .css, so pages also version those
+    // links (assets.js) for a deploy to show up at once.
     res.setHeader('Cache-Control', 'no-cache')
     if (config.baseUrl.startsWith('https://')) res.setHeader('Strict-Transport-Security', 'max-age=31536000')
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next()
@@ -235,14 +246,14 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
   app.get(['/', '/index.html'], (req, res) => {
     const session = readSession(req)
     if (!session) return res.redirect(302, LOGIN_PATH)
-    if (session.state === 'approved') return res.sendFile(path.join(PUBLIC_DIR, 'index.html'), { cacheControl: false })
+    if (session.state === 'approved') return sendPublicPage(res, 'index.html')
     sendStatePage(res, session.state)
   })
   app.get(['/admin', '/admin.html'], (req, res) => {
     const session = readSession(req)
     if (!session) return res.redirect(302, LOGIN_PATH)
     if (!isAdmin(session)) return res.redirect(302, '/')
-    res.sendFile(path.join(PUBLIC_DIR, 'admin.html'), { cacheControl: false })
+    sendPublicPage(res, 'admin.html')
   })
   app.get('/account.html', (_req, res) => res.redirect(302, '/'))
   app.use(express.static(PUBLIC_DIR, { index: false, cacheControl: false }))

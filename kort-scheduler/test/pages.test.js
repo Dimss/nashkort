@@ -1,6 +1,9 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { freshData } from './helpers/tempdata.js'
 import { createFakeIssuer, startApp, request, signIn, beginLogin } from './helpers/fake-issuer.js'
 
@@ -96,13 +99,23 @@ test('the app shell, the confirm-email page and the generic error page are stric
   const shell = await request(srv.origin, '/', asUser(session))
   assert.equal(shell.status, 200)
   assertStrictHtml(shell, 'app shell')
-  assert.match(shell.text, /src="\/app\.js"/)
-  assert.match(shell.text, /href="\/styles\.css"/)
+  // Script and style links carry a hash of the file, so a deploy changes them (Cloudflare caches .js/.css for 4 h).
+  const hashOf = (file) => createHash('sha256').update(readFileSync(new URL(`../public/${file}`, import.meta.url))).digest('hex').slice(0, 12)
+  for (const file of ['app.js', 'template.js', 'styles.css']) {
+    assert.ok(shell.text.includes(`/${file}?v=${hashOf(file)}"`), `${file} is linked with its version`)
+  }
+  assert.doesNotMatch(shell.text, /(src|href)="\/[\w-]+\.(js|css)"/, 'no unversioned script or style link')
+  const versioned = await request(srv.origin, `/app.js?v=${hashOf('app.js')}`)
+  assert.equal(versioned.status, 200)
+  assert.equal(versioned.text, readFileSync(new URL('../public/app.js', import.meta.url), 'utf8'))
   const { authParams, signInCookie } = await beginLogin(srv.origin, issuer)
   const confirm = await request(srv.origin, `/auth/callback?${new URLSearchParams({ error: 'access_denied', error_description: 'email_not_verified', state: authParams.state })}`, { cookies: { [signInCookie.name]: signInCookie.value } })
   assertStrictHtml(confirm, 'confirm page')
   const generic = await request(srv.origin, '/auth/callback?error=server_error&state=nope')
   assertStrictHtml(generic, 'generic error page')
+  for (const [label, res] of [['confirm page', confirm], ['generic error page', generic]]) {
+    assert.ok(res.text.includes(`href="/styles.css?v=${hashOf('styles.css')}"`), `${label} links the versioned stylesheet`)
+  }
   for (const asset of ['/app.js', '/template.js', '/styles.css', '/account.js', '/admin.js', '/i18n.js']) {
     const a = await request(srv.origin, asset)
     assert.equal(a.status, 200, `${asset} is served`)
@@ -125,4 +138,25 @@ test('the page scripts translate every server error string the pages can receive
     assert.ok(admin.includes(`'${s}'`), `admin.js maps "${s}"`)
   }
   assert.match(app, /stMissed/, 'the main page knows the missed status')
+})
+
+test('a changed file gets a new link, an unchanged one keeps its link, and links to missing or outside files are left alone', async () => {
+  const { versionAssetLinks } = await env.load('assets.js')
+  const dir = mkdtempSync(join(tmpdir(), 'kort-assets-'))
+  try {
+    writeFileSync(join(dir, 'a.js'), 'one')
+    writeFileSync(join(dir, 'b.css'), 'same')
+    const html = '<link href="/b.css"><script src="/a.js"></script><script src="/gone.js"></script><a href="/admin">x</a><script src="https://cdn.example/x.js"></script>'
+    const first = versionAssetLinks(html, dir)
+    writeFileSync(join(dir, 'a.js'), 'two')
+    const second = versionAssetLinks(html, dir)
+    const link = (out, name) => out.match(new RegExp(`"/${name.replace('.', '\\.')}\\?v=([0-9a-f]{12})"`))?.[1]
+    assert.ok(link(first, 'a.js') && link(second, 'a.js'))
+    assert.notEqual(link(first, 'a.js'), link(second, 'a.js'))
+    assert.equal(link(first, 'b.css'), link(second, 'b.css'))
+    assert.ok(second.includes('src="/gone.js"'), 'a missing file keeps its plain link')
+    assert.ok(second.includes('href="/admin"') && second.includes('src="https://cdn.example/x.js"'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
