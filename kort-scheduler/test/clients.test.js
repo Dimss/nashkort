@@ -162,3 +162,64 @@ test('a client is never constructed with a non-integer folder key', () => {
   assert.throws(() => registry.ensure(0))
   assert.equal(registry.size, 0)
 })
+
+// --- exact-time sends -------------------------------------------------------
+
+// A connected client over a socket double that records sends and answers the
+// group-send lookups from fixed data.
+async function connectedClient(userId, sockOver = {}) {
+  const { EventEmitter } = await import('node:events')
+  const sock = Object.assign(fakeSocket(), { ws: new EventEmitter(), sends: [], ...sockOver })
+  sock.sendMessage ??= async (jid, content, options) => { sock.sends.push({ jid, content, options }) }
+  const silent = { info() {}, warn() {}, error() {}, debug() {}, trace() {}, child() { return silent }, level: 'silent' }
+  const client = new WhatsAppClient({ authDir: config.authDirFor(userId), logger: silent, versionProvider: async () => [2, 3000, 0], socketFactory: () => sock })
+  await client.start()
+  sock.emit('connection.update', { connection: 'open' })
+  return { client, sock }
+}
+
+test('a text goes out without a link preview, under its own message id, and its ack resolves when the server acknowledges that id', async () => {
+  const { client, sock } = await connectedClient(20)
+  const { messageId, ack } = await client.sendText('g@g.us', 'see https://example.com')
+  assert.equal(sock.sends.length, 1)
+  assert.deepEqual(sock.sends[0].content, { text: 'see https://example.com', linkPreview: null })
+  assert.equal(sock.sends[0].options.messageId, messageId)
+  sock.ws.emit('CB:ack,class:message', { attrs: { id: 'someone-else', from: 'g@g.us' } })
+  const before = Date.now()
+  sock.ws.emit('CB:ack,class:message', { attrs: { id: messageId, from: 'g@g.us' } })
+  const result = await ack
+  assert.ok(result.at >= before)
+  assert.equal(result.error, null)
+  await client.stop()
+})
+
+test('an ack that never comes resolves as null after the timeout', async () => {
+  const { client } = await connectedClient(21)
+  const { ack } = await client.sendText('g@g.us', 'hi', { ackTimeoutMs: 20 })
+  assert.equal(await ack, null)
+  await client.stop()
+})
+
+test('preparing a group send fetches members and devices and opens sessions only for devices without our sender key', async () => {
+  const calls = { usync: [], sessions: [] }
+  const { client } = await connectedClient(22, {
+    groupMetadata: async (jid) => ({ id: jid, participants: [{ id: 'a@lid' }, { id: 'b@lid' }] }),
+    getUSyncDevices: async (jids, useCache) => {
+      calls.usync.push({ jids, useCache })
+      return [
+        { user: 'a', device: 0, jid: 'a@lid' },
+        { user: 'a', device: 2, jid: 'a:2@lid' },
+        { user: 'b', device: 0, jid: 'b@lid' },
+        { user: 'b', device: 99, jid: 'b:99@lid' },
+        { user: 'h', device: 0, jid: 'h@hosted.lid' },
+      ]
+    },
+    authState: { keys: { get: async (type, ids) => ({ [ids[0]]: type === 'sender-key-memory' ? { 'a@lid': true } : undefined }) } },
+    assertSessions: async (jids) => { calls.sessions.push(jids) },
+  })
+  const r = await client.prepareGroupSend('g@g.us')
+  assert.deepEqual(calls.usync, [{ jids: ['a@lid', 'b@lid'], useCache: false }], 'device lists are fetched fresh')
+  assert.deepEqual(calls.sessions, [['a:2@lid', 'b@lid']])
+  assert.deepEqual(r, { participants: 2, devices: 5, newSessions: 2 })
+  await client.stop()
+})

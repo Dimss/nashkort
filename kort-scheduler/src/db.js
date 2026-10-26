@@ -35,6 +35,15 @@ const stmts = {
     WHERE m.status = 'pending' AND u.state = 'approved'
       AND MAX(m.send_at, COALESCE(m.next_attempt_at, 0)) > ?
   `),
+  // Pending rows of approved owners that become sendable in (after, until], with that time as `at`.
+  upcoming: db.prepare(`
+    SELECT m.*, MAX(m.send_at, COALESCE(m.next_attempt_at, 0)) AS at FROM scheduled_messages m
+    JOIN users u ON u.id = m.owner_id
+    WHERE m.status = 'pending' AND u.state = 'approved'
+      AND MAX(m.send_at, COALESCE(m.next_attempt_at, 0)) > ?
+      AND MAX(m.send_at, COALESCE(m.next_attempt_at, 0)) <= ?
+    ORDER BY at ASC
+  `),
   claim: db.prepare(`
     UPDATE scheduled_messages SET status = 'sending'
     WHERE id = ? AND status = 'pending'
@@ -110,6 +119,9 @@ export const messages = {
   },
   nextWakeAfter(now = Date.now()) {
     return stmts.nextWake.get(now)?.at ?? null
+  },
+  upcoming(after, until) {
+    return stmts.upcoming.all(after, until)
   },
   claim(id) {
     return stmts.claim.run(id).changes === 1

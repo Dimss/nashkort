@@ -7,6 +7,8 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
   Browsers,
+  generateMessageIDV2,
+  jidDecode,
 } from '@whiskeysockets/baileys'
 import QRCode from 'qrcode'
 
@@ -41,6 +43,7 @@ export class WhatsAppClient extends EventEmitter {
   #reconnectTimer = null
   #stopped = false
   #generation = 0
+  #acks = new Map() // message id -> callback, for sends waiting on the server's ack
 
   constructor({ authDir, logger, socketFactory = makeWASocket, versionProvider = null, groupCacheMs = 60_000 }) {
     super()
@@ -91,6 +94,12 @@ export class WhatsAppClient extends EventEmitter {
     this.sock = sock
 
     sock.ev.on('creds.update', saveCreds)
+
+    // The server acknowledges every message it accepts with an ack node carrying the message id.
+    sock.ws?.on?.('CB:ack,class:message', (node) => {
+      const done = this.#acks.get(node?.attrs?.id)
+      if (done) done(Date.now(), node.attrs.error ?? null)
+    })
 
     sock.ev.on('connection.update', async (update) => {
       if (this.sock !== sock) return
@@ -188,9 +197,48 @@ export class WhatsAppClient extends EventEmitter {
     return list
   }
 
-  async sendText(jid, text) {
+  // Does the network work of a group send ahead of time, so the send itself is local
+  // encryption plus one socket write: fresh group metadata (the member list), every
+  // member's device list (Baileys caches it for 5 minutes) and a Signal session with each
+  // device that has not yet received our sender key for this group.
+  async prepareGroupSend(jid) {
     if (!this.connected) throw new Error('WhatsApp is not connected')
-    return this.sock.sendMessage(jid, { text })
+    const sock = this.sock
+    const meta = await sock.groupMetadata(jid)
+    this.#groupMeta.set(jid, meta)
+    const devices = await sock.getUSyncDevices(meta.participants.map((p) => p.id), false, false)
+    const memory = (await sock.authState.keys.get('sender-key-memory', [jid]))[jid] ?? {}
+    // Same exclusions as Baileys' group send: hosted devices and device 99 get no sender key.
+    const needSession = devices
+      .filter((d) => d.device !== 99 && !jidDecode(d.jid)?.server?.startsWith('hosted'))
+      .map((d) => d.jid)
+      .filter((deviceJid) => !memory[deviceJid])
+    if (needSession.length) await sock.assertSessions(needSession)
+    return { participants: meta.participants.length, devices: devices.length, newSessions: needSession.length }
+  }
+
+  // Resolves once the socket write is done. `ack` resolves with the time the server
+  // acknowledged the message, or null after `ackTimeoutMs`.
+  async sendText(jid, text, { ackTimeoutMs = 10_000 } = {}) {
+    if (!this.connected) throw new Error('WhatsApp is not connected')
+    const messageId = generateMessageIDV2(this.sock.user?.id)
+    const ack = new Promise((resolve) => {
+      const timer = setTimeout(() => { this.#acks.delete(messageId); resolve(null) }, ackTimeoutMs)
+      timer.unref?.()
+      this.#acks.set(messageId, (at, error) => {
+        clearTimeout(timer)
+        this.#acks.delete(messageId)
+        resolve(at == null ? null : { at, error })
+      })
+    })
+    try {
+      // linkPreview: null skips Baileys' URL fetch for a preview, which would run before the send.
+      await this.sock.sendMessage(jid, { text, linkPreview: null }, { messageId })
+    } catch (err) {
+      this.#acks.get(messageId)?.(null, null)
+      throw err
+    }
+    return { messageId, ack }
   }
 
   async logout() {

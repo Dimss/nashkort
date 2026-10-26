@@ -92,6 +92,7 @@ database connection or Google.
 ## Behaviour
 
 - Messages are stored in SQLite (`data/scheduler.db`) and survive restarts.
+- A message goes out at its exact send time, to the millisecond on the server's clock. A minute before, the app fetches what the send needs from WhatsApp (group members, their devices, encryption sessions), so at the send time only local encryption and one write remain. Messages for different groups due at the same time go out together. The log line for each send shows how many milliseconds after the send time it was written and when WhatsApp's server acknowledged it. Accuracy depends on the server clock, so keep it synced (`timedatectl` should show `System clock synchronized: yes`).
 - If a user's phone is disconnected when a message is due, it stays pending and goes out as soon as the connection is back.
 - A send that WhatsApp rejects is not retried: it is marked **failed** with the error at once. A repeating message still gets its next occurrence. (A disconnected phone is not a failure; see above.)
 - Pending messages can be cancelled; sent, failed, missed or cancelled ones can be deleted.

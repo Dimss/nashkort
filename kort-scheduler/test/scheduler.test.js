@@ -39,9 +39,9 @@ function fakeRegistry() {
     ensured: [],
     get(userId) { return map.get(userId) },
     ensure(userId) { this.ensured.push(userId) },
-    connect(userId, sendText = async () => {}) {
+    connect(userId, sendText = async () => {}, extra = {}) {
       const sent = []
-      const client = { connected: true, sent, sendText: async (jid, text) => { sent.push([jid, text]); return sendText(jid, text) } }
+      const client = { connected: true, sent, sendText: async (jid, text) => { sent.push([jid, text]); return sendText(jid, text) }, ...extra }
       map.set(userId, client)
       return client
     },
@@ -419,4 +419,72 @@ test('stop clears the timer and the created listener', async () => {
   assert.equal(messages.getById(r.id).status, 'pending')
   assert.equal(messages.events.listenerCount('created'), 0)
   messages.cancel(r.id, u.id)
+})
+
+// --- prepared, exact-time sends ----------------------------------------------
+
+test('rows inside the prepare window are prepared once per group before their time and go out within milliseconds of it', async () => {
+  const u = approvedUser()
+  const sendAt = Date.now() + 250
+  const a1 = row(u.id, { sendAt, groupJid: 'g1@g.us', message: 'a1' })
+  const a2 = row(u.id, { sendAt, groupJid: 'g1@g.us', message: 'a2' })
+  const b = row(u.id, { sendAt, groupJid: 'g2@g.us', message: 'b' })
+  const registry = fakeRegistry()
+  const prepares = []
+  const sends = []
+  registry.connect(u.id, async (jid, text) => { sends.push({ text, at: Date.now() }) }, {
+    prepareGroupSend: async (jid) => { prepares.push({ jid, at: Date.now() }); return { participants: 1, devices: 1, newSessions: 0 } },
+  })
+  const s = makeScheduler(registry, { prepareLeadMs: 1000 })
+  s.start()
+  await wait(500)
+  s.stop()
+  assert.deepEqual(prepares.map((p) => p.jid).sort(), ['g1@g.us', 'g2@g.us'])
+  assert.ok(prepares.every((p) => p.at < sendAt), 'prepared ahead of the send time')
+  for (const id of [a1.id, a2.id, b.id]) assert.equal(messages.getById(id).status, 'sent')
+  assert.deepEqual(sends.map((x) => x.text).filter((t) => t !== 'b'), ['a1', 'a2'], 'same group keeps its order')
+  for (const x of sends) {
+    assert.ok(x.at >= sendAt, 'never early')
+    assert.ok(x.at - sendAt < 25, `${x.text} went out ${x.at - sendAt} ms late`)
+  }
+})
+
+test('a phone that connects inside the prepare window still gets the send prepared', async () => {
+  const u = approvedUser()
+  const r = row(u.id, { sendAt: Date.now() + 300 })
+  const registry = fakeRegistry()
+  registry.disconnect(u.id)
+  const s = makeScheduler(registry, { prepareLeadMs: 1000 })
+  s.start()
+  await settle()
+  let prepared = 0
+  registry.connect(u.id, async () => {}, { prepareGroupSend: async () => { prepared++; return { participants: 1, devices: 1, newSessions: 0 } } })
+  registry.events.emit('connected', u.id)
+  await wait(450)
+  s.stop()
+  assert.equal(prepared, 1)
+  assert.equal(messages.getById(r.id).status, 'sent')
+})
+
+test('overdue rows for different groups go out in parallel, rows for one group one after another', async () => {
+  const u = approvedUser()
+  const g1a = row(u.id, { groupJid: 'p1@g.us', message: 'first' })
+  const g1b = row(u.id, { groupJid: 'p1@g.us', message: 'second' })
+  const g2 = row(u.id, { groupJid: 'p2@g.us', message: 'other' })
+  const registry = fakeRegistry()
+  let release
+  const gate = new Promise((r) => { release = r })
+  const order = []
+  registry.connect(u.id, async (jid, text) => {
+    order.push(text)
+    if (text === 'first') await gate
+  })
+  const s = makeScheduler(registry)
+  const ticking = s.tick()
+  await settle()
+  assert.deepEqual(order, ['first', 'other'], 'the other group did not wait for the slow send')
+  release()
+  await ticking
+  assert.deepEqual(order, ['first', 'other', 'second'])
+  for (const id of [g1a.id, g1b.id, g2.id]) assert.equal(messages.getById(id).status, 'sent')
 })
