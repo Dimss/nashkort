@@ -145,17 +145,22 @@ export function createScheduler({ registry, config = defaultConfig }) {
     const attempts = row.attempts + 1
     try {
       const result = await client.sendText(row.group_jid, renderTemplate(row.message, row.send_at, zoneOf(row)))
-      const written = Date.now() - dueAt
+      const doneAt = result?.doneAt ?? Date.now()
       messages.markSent(row.id)
       if (row.repeat_rule !== 'none') scheduleNextOccurrence(row)
-      const to = row.group_name ?? row.group_jid
+      // Times after the send time: the socket write, Baileys finishing (it saves keys
+      // after the write) and the server's ack.
+      const parts = []
+      if (result?.writtenAt != null) parts.push(`socket write +${result.writtenAt - dueAt} ms`)
+      parts.push(`send done +${doneAt - dueAt} ms`)
+      const line = `[scheduler] sent #${row.id} to ${row.group_name ?? row.group_jid}`
       if (result?.ack) {
         result.ack.then((ack) => {
-          const server = ack ? `server ack +${ack.at - dueAt} ms${ack.error ? ` (error ${ack.error})` : ''}` : 'no server ack within 10 s'
-          console.log(`[scheduler] sent #${row.id} to ${to}: written +${written} ms, ${server}`)
+          parts.push(ack ? `server ack +${ack.at - dueAt} ms${ack.error ? ` (error ${ack.error})` : ''}` : 'no server ack within 10 s')
+          console.log(`${line}: ${parts.join(', ')}`)
         })
       } else {
-        console.log(`[scheduler] sent #${row.id} to ${to}: written +${written} ms`)
+        console.log(`${line}: ${parts.join(', ')}`)
       }
     } catch (err) {
       const msg = err?.message ?? String(err)

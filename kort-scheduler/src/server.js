@@ -304,6 +304,16 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     }
   })
 
+  // The last messages the caller's connection saw in one group (kept in memory only).
+  app.get('/api/groups/:jid/recent', (req, res) => {
+    const jid = req.params.jid
+    if (typeof jid !== 'string' || jid.length > 128 || !jid.endsWith('@g.us')) {
+      return res.status(400).json({ error: 'Please choose a group.' })
+    }
+    const client = clients.get(req.user.user_id)
+    res.json(client ? client.recentMessages(jid) : { since: null, messages: [] })
+  })
+
   app.get('/api/messages', (req, res) => {
     // `preview` is the text as it goes out, with placeholders filled in; a
     // pending row also lists its next sends (`upcoming`), the way the scheduler

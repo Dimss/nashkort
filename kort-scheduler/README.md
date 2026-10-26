@@ -92,7 +92,8 @@ database connection or Google.
 ## Behaviour
 
 - Messages are stored in SQLite (`data/scheduler.db`) and survive restarts.
-- A message goes out at its exact send time, to the millisecond on the server's clock. A minute before, the app fetches what the send needs from WhatsApp (group members, their devices, encryption sessions), so at the send time only local encryption and one write remain. Messages for different groups due at the same time go out together. The log line for each send shows how many milliseconds after the send time it was written and when WhatsApp's server acknowledged it. Accuracy depends on the server clock, so keep it synced (`timedatectl` should show `System clock synchronized: yes`).
+- A message goes out at its exact send time, to the millisecond on the server's clock. A minute before, the app fetches what the send needs from WhatsApp (group members, their devices, encryption sessions), so at the send time only local encryption and one write remain. Messages for different groups due at the same time go out together. The log line for each send shows, in milliseconds after the send time, when it was written to the socket, when Baileys finished (it saves keys after the write) and when WhatsApp's server acknowledged it. Accuracy depends on the server clock, so keep it synced (`timedatectl` should show `System clock synchronized: yes`).
+- **Recent messages** under the form shows the last 10 messages of the chosen group: WhatsApp's server time (whole seconds), when the message reached the server running the app (milliseconds; for your own scheduled sends, when they left), the sender and the first 60 characters, in arrival order. Only messages seen since the connection started are listed, and they are kept in memory only, so the list starts empty after a restart.
 - If a user's phone is disconnected when a message is due, it stays pending and goes out as soon as the connection is back.
 - A send that WhatsApp rejects is not retried: it is marked **failed** with the error at once. A repeating message still gets its next occurrence. (A disconnected phone is not a failure; see above.)
 - Pending messages can be cancelled; sent, failed, missed or cancelled ones can be deleted.
@@ -113,6 +114,7 @@ must come from the app's own origin.
 | GET | `/api/me` | `{ email, state, isAdmin }` for any signed-in account |
 | GET | `/api/status` | The caller's connection status and QR code (data URL) when a scan is needed |
 | GET | `/api/groups?refresh=1` | Groups the caller's phone is in |
+| GET | `/api/groups/:jid/recent` | `{ since, messages }`: the last 10 messages the caller's connection saw in that group |
 | GET | `/api/messages` | The caller's scheduled messages |
 | POST | `/api/messages` | `{ groupJid, groupName, message, sendAt, repeat }` (`sendAt` epoch ms, `repeat` `none`\|`weekly`\|`monthly`) |
 | POST | `/api/messages/:id/cancel` | Cancel one of the caller's pending messages |

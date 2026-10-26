@@ -23,6 +23,18 @@ const TRANSLATIONS = {
     repeatHint: 'Повторяющееся сообщение будет отправляться автоматически; следующая отправка появится в списке после текущей.',
     scheduleBtn: 'Запланировать',
     refreshGroupsBtn: 'Обновить группы',
+    recentBtn: 'Последние сообщения',
+    recentTitle: 'Последние сообщения в «{group}»',
+    recentSince: 'Собираются с {date}, пока приложение подключено; после перезапуска список начинается заново.',
+    recentEmpty: 'С {date} в этой группе сообщений не было.',
+    recentNotCollecting: 'WhatsApp не подключён, сообщения не собираются.',
+    recentHint: 'Время сервера WhatsApp — с точностью до секунды; «Получено» — когда сообщение дошло до нашего сервера (ваше — когда ушло). Строки идут в порядке поступления.',
+    recentYou: 'Вы',
+    recentUndecrypted: '[не удалось расшифровать]',
+    thServerTime: 'Время сервера',
+    thReceived: 'Получено',
+    thFrom: 'От',
+    thText: 'Текст',
     scheduledTitle: 'Запланированные сообщения',
     thWhen: 'Когда',
     thGroup: 'Группа',
@@ -96,6 +108,18 @@ const TRANSLATIONS = {
     repeatHint: 'A repeating message sends automatically; the next occurrence appears in the list after the current one goes out.',
     scheduleBtn: 'Schedule',
     refreshGroupsBtn: 'Refresh groups',
+    recentBtn: 'Recent messages',
+    recentTitle: 'Recent messages in “{group}”',
+    recentSince: 'Collected since {date} while the app is connected; the list starts over after a restart.',
+    recentEmpty: 'No messages in this group since {date}.',
+    recentNotCollecting: 'WhatsApp is not connected, so no messages are being collected.',
+    recentHint: 'WhatsApp’s server time is to the second; “Received” is when the message reached our server (yours: when it left). Rows are in arrival order.',
+    recentYou: 'You',
+    recentUndecrypted: '[could not decrypt]',
+    thServerTime: 'Server time',
+    thReceived: 'Received',
+    thFrom: 'From',
+    thText: 'Text',
     scheduledTitle: 'Scheduled messages',
     thWhen: 'When',
     thGroup: 'Group',
@@ -388,6 +412,40 @@ $('form').addEventListener('submit', async (e) => {
   }
 })
 
+// Last messages of the chosen group, with WhatsApp's server time (seconds) and when
+// they reached us (milliseconds), in arrival order.
+const locale = () => (lang === 'ru' ? 'ru-RU' : 'en-US')
+const fmtSeconds = () => new Intl.DateTimeFormat(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone: zone })
+const fmtMillis = () => new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hourCycle: 'h23', timeZone: zone })
+
+async function showRecent() {
+  const box = $('recentBox')
+  const sel = $('group')
+  const msg = $('formMsg')
+  msg.className = ''; msg.textContent = ''
+  if (!sel.value) {
+    msg.className = 'error'; msg.textContent = t('errChooseGroup')
+    return
+  }
+  try {
+    const { since, messages } = await api(`/api/groups/${encodeURIComponent(sel.value)}/recent`)
+    const name = sel.selectedOptions[0]?.textContent.replace(/ \(\d+\)$/, '') || sel.value
+    $('recentTitle').textContent = t('recentTitle', { group: name })
+    const sinceText = since ? fmtSeconds().format(since) : null
+    $('recentInfo').textContent = !since ? t('recentNotCollecting')
+      : messages.length ? t('recentSince', { date: sinceText }) : t('recentEmpty', { date: sinceText })
+    $('recentList').innerHTML = messages.map((m) => `<tr${m.fromMe ? ' class="mine"' : ''}>
+        <td class="time">${m.serverTime ? esc(fmtSeconds().format(m.serverTime)) : '—'}</td>
+        <td class="time">${esc(fmtMillis().format(m.receivedAt))}</td>
+        <td>${esc(m.fromMe ? t('recentYou') : (m.sender || '—'))}</td>
+        <td class="msg">${esc(m.undecrypted ? t('recentUndecrypted') : m.text)}</td>
+      </tr>`).join('')
+    box.hidden = false
+  } catch (err) {
+    msg.className = 'error'; msg.textContent = err.message
+  }
+}
+
 function showUpcoming(button) {
   const sends = upcomingById.get(button.dataset.upcoming)
   if (!sends) return
@@ -447,6 +505,8 @@ $('groupFilter').addEventListener('input', renderGroups)
 $('message').addEventListener('input', updateTemplatePreview)
 $('sendAt').addEventListener('input', updateTemplatePreview)
 $('refreshGroups').addEventListener('click', () => loadGroups(true))
+$('recentBtn').addEventListener('click', showRecent)
+$('group').addEventListener('change', () => { $('recentBox').hidden = true })
 $('logout').addEventListener('click', async () => {
   if (!confirm(t('logoutConfirm'))) return
   try { await api('/api/logout', { method: 'POST' }) } catch (err) { alert(err.message) }

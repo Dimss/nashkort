@@ -79,3 +79,7 @@
   .state-badge.approved { background: #dcf5e6; color: #176d3b; }
   .state-badge.disabled { background: #fde2e1; color: #a12a22; }
   .msg { font-size: 13px; min-height: 1.2em; margin-top: 10px; }
+
+  .recent { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .recent td.time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .recent tr.mine td { font-weight: 600; }

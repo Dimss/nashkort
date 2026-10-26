@@ -240,3 +240,33 @@ test('AE5 (R16, R17): over HTTP a user cannot read, cancel or delete another use
   assert.equal((await bad({ groupJid: 'g@g.us', message: 'hi', sendAt: Date.now() - 3600_000 })).status, 400)
   assert.equal((await bad({ groupJid: 'g@g.us', message: 'hi', sendAt: future(), repeat: 'hourly' })).status, 400)
 })
+
+test('recent messages: each user gets only their own connection\'s list, a bad group id is refused, and no connection gives an empty list', async () => {
+  const { clients } = await env.load('clients.js')
+  const a = await signIn(srv.origin, issuer, verified('auth0|recent-a', 'recent-a@example.com'))
+  const b = await signIn(srv.origin, issuer, verified('auth0|recent-b', 'recent-b@example.com'))
+  const c = await signIn(srv.origin, issuer, verified('auth0|recent-c', 'recent-c@example.com'))
+  const ids = ['a', 'b', 'c'].map((x) => users.findBySub(`auth0|recent-${x}`).id)
+  for (const id of ids) users.setState(id, 'approved')
+  const asked = []
+  const fake = (label) => ({ recentMessages: (jid) => { asked.push([label, jid]); return { since: 1, messages: [{ id: label, text: `${label} text` }] } } })
+  const byId = new Map([[ids[0], fake('a')], [ids[1], fake('b')]])
+  const realGet = clients.get
+  clients.get = (id) => byId.get(id)
+  try {
+    const ra = await request(srv.origin, `/api/groups/${encodeURIComponent('g@g.us')}/recent`, asUser(a.session))
+    assert.equal(ra.status, 200)
+    assert.deepEqual(ra.json(), { since: 1, messages: [{ id: 'a', text: 'a text' }] })
+    const rb = await request(srv.origin, `/api/groups/${encodeURIComponent('g@g.us')}/recent`, asUser(b.session))
+    assert.deepEqual(rb.json().messages.map((m) => m.id), ['b'])
+    assert.deepEqual(asked, [['a', 'g@g.us'], ['b', 'g@g.us']])
+    const bad = await request(srv.origin, `/api/groups/${encodeURIComponent('972500000001@s.whatsapp.net')}/recent`, asUser(a.session))
+    assert.equal(bad.status, 400)
+    const none = await request(srv.origin, `/api/groups/${encodeURIComponent('g@g.us')}/recent`, asUser(c.session))
+    assert.deepEqual(none.json(), { since: null, messages: [] })
+    const anon = await request(srv.origin, `/api/groups/${encodeURIComponent('g@g.us')}/recent`)
+    assert.equal(anon.status, 401)
+  } finally {
+    clients.get = realGet
+  }
+})
