@@ -15,9 +15,6 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys'
 import QRCode from 'qrcode'
 
-// How many recent messages are kept per group, and how much of each text.
-export const RECENT_PER_GROUP = 10
-export const RECENT_TEXT_LENGTH = 60
 // Content that is not a chat message of its own.
 const NOT_A_MESSAGE = new Set(['protocolMessage', 'senderKeyDistributionMessage', 'messageContextInfo', 'reactionMessage', 'pollUpdateMessage'])
 
@@ -35,17 +32,15 @@ function senderOf(m) {
   return jidDecode(jid)?.user ?? (jid || null)
 }
 
-// The first RECENT_TEXT_LENGTH characters of the message, or its kind in brackets
-// (`[image]`) when it has no text. Null for content that is not a message.
+// The message's text, or its kind in brackets (`[image]`) when it has none.
+// Null for content that is not a message.
 function summarize(m) {
   if (!m.message) return m.messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT ? { text: null, undecrypted: true } : null
   const content = normalizeMessageContent(m.message)
   const type = getContentType(content)
   if (!type || NOT_A_MESSAGE.has(type)) return null
   const body = type === 'conversation' ? content.conversation : (content[type]?.text ?? content[type]?.caption)
-  const text = typeof body === 'string' && body
-    ? (body.length > RECENT_TEXT_LENGTH ? `${body.slice(0, RECENT_TEXT_LENGTH)}…` : body)
-    : `[${type.replace(/Message$/, '')}]`
+  const text = typeof body === 'string' && body ? body : `[${type.replace(/Message$/, '')}]`
   return { text, undecrypted: false }
 }
 
@@ -82,8 +77,6 @@ export class WhatsAppClient extends EventEmitter {
   #generation = 0
   #acks = new Map() // message id -> callback, for sends waiting on the server's ack
   #writes = new Map() // message id -> when Baileys wrote its stanza to the socket
-  #recent = new Map() // group jid -> the last RECENT_PER_GROUP messages, oldest first
-  #recentSince = null // when this client started collecting them
   #socketLogger
 
   constructor({ authDir, logger, socketFactory = makeWASocket, versionProvider = null, groupCacheMs = 60_000 }) {
@@ -156,22 +149,22 @@ export class WhatsAppClient extends EventEmitter {
       if (done) done(Date.now(), node.attrs.error ?? null, secondsToMs(node.attrs.t))
     })
 
+    // Every group chat message, as a 'group-message' event (jid, entry) with WhatsApp's
+    // own time. Our own sends echo back here with the local clock's time instead, so
+    // theirs comes from the server's ack (see sendText).
     sock.ev.on('messages.upsert', ({ messages, type }) => {
       if (this.sock !== sock || (type !== 'notify' && type !== 'append')) return
-      const receivedAt = Date.now()
       for (const m of messages ?? []) {
         const jid = m.key?.remoteJid
         if (!jid?.endsWith('@g.us') || !m.key.id) continue
         const summary = summarize(m)
         if (!summary) continue
-        // Our own sends echo back with the local clock's time; their server time comes from the ack.
         const own = m.key.fromMe && type === 'append'
-        this.#remember(jid, {
+        this.emit('group-message', jid, {
           id: m.key.id,
           fromMe: !!m.key.fromMe,
           sender: senderOf(m),
           serverTime: own ? null : secondsToMs(m.messageTimestamp),
-          receivedAt,
           ...summary,
         })
       }
@@ -191,7 +184,6 @@ export class WhatsAppClient extends EventEmitter {
       }
 
       if (connection === 'open') {
-        this.#recentSince ??= Date.now()
         this.qrDataUrl = null
         this.lastError = null
         this.me = sock.user ?? null
@@ -308,7 +300,7 @@ export class WhatsAppClient extends EventEmitter {
       this.#acks.set(messageId, (at, error, serverTime) => {
         clearTimeout(timer)
         this.#acks.delete(messageId)
-        if (at != null && serverTime != null) this.#update(jid, messageId, { serverTime })
+        if (at != null && serverTime != null) this.emit('group-message', jid, { id: messageId, fromMe: true, serverTime })
         resolve(at == null ? null : { at, error, serverTime })
       })
     })
@@ -323,37 +315,8 @@ export class WhatsAppClient extends EventEmitter {
     const doneAt = Date.now()
     const writtenAt = this.#writes.get(messageId) ?? null
     this.#writes.delete(messageId)
-    // For our own sends, "received" is when the message left for the server.
-    this.#remember(jid, { id: messageId, fromMe: true, sender: null, serverTime: null, receivedAt: writtenAt ?? doneAt, ...summarize({ message: { conversation: text } }) })
+    this.emit('group-message', jid, { id: messageId, fromMe: true, text })
     return { messageId, writtenAt, doneAt, ack }
-  }
-
-  // The last RECENT_PER_GROUP messages of a group seen since this client started, oldest first.
-  recentMessages(jid) {
-    return { since: this.#recentSince, messages: (this.#recent.get(jid) ?? []).map((m) => ({ ...m })) }
-  }
-
-  // Adds a message, or merges into the one with the same id: our own send arrives
-  // twice (the write and Baileys' echo), and a message that failed to decrypt comes
-  // again once it does. The earliest arrival time is kept.
-  #remember(jid, entry) {
-    const list = this.#recent.get(jid) ?? []
-    const existing = list.find((m) => m.id === entry.id)
-    if (existing) {
-      const receivedAt = Math.min(existing.receivedAt, entry.receivedAt)
-      for (const [k, v] of Object.entries(entry)) if (v != null) existing[k] = v
-      existing.receivedAt = receivedAt
-    } else {
-      list.push(entry)
-    }
-    list.sort((a, b) => a.receivedAt - b.receivedAt)
-    if (list.length > RECENT_PER_GROUP) list.splice(0, list.length - RECENT_PER_GROUP)
-    this.#recent.set(jid, list)
-  }
-
-  #update(jid, id, fields) {
-    const m = this.#recent.get(jid)?.find((x) => x.id === id)
-    if (m) Object.assign(m, fields)
   }
 
   async logout() {
@@ -369,8 +332,6 @@ export class WhatsAppClient extends EventEmitter {
     fs.rmSync(this.authDir, { recursive: true, force: true })
     this.#groupCache = { at: 0, list: [] }
     this.#groupMeta.clear()
-    this.#recent.clear()
-    this.#recentSince = null
     this.#setStatus('logged_out')
     await this.start()
   }
@@ -384,8 +345,6 @@ export class WhatsAppClient extends EventEmitter {
     try { sock?.end?.(undefined) } catch {}
     this.qrDataUrl = null
     this.me = null
-    this.#recent.clear()
-    this.#recentSince = null
     this.#setStatus('disconnected')
   }
 

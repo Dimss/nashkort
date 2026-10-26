@@ -80,6 +80,9 @@
   .state-badge.disabled { background: #fde2e1; color: #a12a22; }
   .msg { font-size: 13px; min-height: 1.2em; margin-top: 10px; }
 
-  .recent { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
-  .recent td.time { white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .recent tr.mine td { font-weight: 600; }
+  .day-pick { margin-top: 18px; padding-top: 6px; border-top: 1px solid var(--border); }
+  .actions.tight { margin-top: 0; }
+  input[type=date] { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); }
+  .day { margin-top: 14px; }
+  .day td.time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .day tr.mine td { font-weight: 600; }

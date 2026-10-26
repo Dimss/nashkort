@@ -16,7 +16,7 @@ if (!isValidTimeZone(config.timeZone)) {
 const { bootstrap } = await import('./bootstrap.js')
 const { createApp } = await import('./server.js')
 const { clients } = await import('./clients.js')
-const { users } = await import('./db.js')
+const { users, groupMessages } = await import('./db.js')
 const { scheduler } = await import('./scheduler.js')
 
 bootstrap()
@@ -31,6 +31,10 @@ clients.bootAll(users.list().filter((u) => u.state === 'approved').map((u) => u.
   console.error('Failed to start WhatsApp clients', err)
 })
 scheduler.start()
+
+// Saved group messages are kept for 30 days.
+groupMessages.prune()
+setInterval(() => groupMessages.prune(), 60 * 60 * 1000).unref()
 
 async function shutdown() {
   console.log('Shutting down…')

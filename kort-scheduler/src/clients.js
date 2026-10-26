@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import pino from 'pino'
 import { config } from './config.js'
 import { WhatsAppClient, hasCredentials } from './whatsapp.js'
+import { groupMessages } from './db.js'
 
 const IDLE_STATUSES = new Set(['connecting', 'qr'])
 
@@ -106,14 +107,28 @@ export function createRegistry({ makeClient, idleMs = 5 * 60_000, staggerMs = 20
   return registry
 }
 
+// Saves every group message a user's client reports, for the day view
+// (GET /api/groups/:jid/messages).
+export function saveGroupMessages(client, userId, store = groupMessages) {
+  client.on('group-message', (jid, entry) => {
+    try {
+      store.record(userId, jid, entry)
+    } catch (err) {
+      client.logger?.error?.({ err }, 'could not save a group message')
+    }
+  })
+}
+
 const baseLogger = pino({ level: config.waLogLevel })
 
 export const clients = createRegistry({
   makeClient(userId) {
-    return new WhatsAppClient({
+    const client = new WhatsAppClient({
       authDir: config.authDirFor(userId),
       logger: baseLogger.child({ userId }),
       groupCacheMs: config.groupCacheMs,
     })
+    saveGroupMessages(client, userId)
+    return client
   },
 })

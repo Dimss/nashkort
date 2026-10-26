@@ -54,25 +54,31 @@
       <div class="actions">
         <button type="submit" id="submit" data-i18n="scheduleBtn">Запланировать</button>
         <button type="button" class="secondary" id="refreshGroups" data-i18n="refreshGroupsBtn">Обновить группы</button>
-        <button type="button" class="secondary" id="recentBtn" data-i18n="recentBtn">Последние сообщения</button>
         <span id="formMsg"></span>
       </div>
     </form>
-    <div id="recentBox" class="recent" hidden>
-      <h2 id="recentTitle"></h2>
-      <p class="hint" id="recentInfo"></p>
+    <div class="day-pick">
+      <label for="dayDate" data-i18n="dayLabel">Сообщения группы за день</label>
+      <div class="actions tight">
+        <input type="date" id="dayDate">
+        <button type="button" class="secondary" id="dayBtn" data-i18n="dayBtn">Показать</button>
+        <span id="dayMsg"></span>
+      </div>
+    </div>
+    <div id="dayBox" class="day" hidden>
+      <h2 id="dayTitle"></h2>
+      <p class="hint" id="dayInfo"></p>
       <div class="scroll-x">
         <table>
           <thead><tr>
-            <th data-i18n="thServerTime">Время сервера</th>
-            <th data-i18n="thReceived">Получено</th>
+            <th data-i18n="thTime">Время</th>
             <th data-i18n="thFrom">От</th>
             <th data-i18n="thText">Текст</th>
           </tr></thead>
-          <tbody id="recentList"></tbody>
+          <tbody id="dayList"></tbody>
         </table>
       </div>
-      <p class="hint" data-i18n="recentHint">Время сервера WhatsApp — с точностью до секунды; «Получено» — когда сообщение дошло до нашего сервера (ваше — когда ушло). Строки идут в порядке поступления.</p>
+      <p class="hint" data-i18n="dayHint">Время — как его записал WhatsApp, с точностью до секунды. Сообщения с одной секундой идут в порядке, в котором их принял WhatsApp.</p>
     </div>
   </section>
 

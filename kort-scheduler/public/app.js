@@ -23,18 +23,19 @@ const TRANSLATIONS = {
     repeatHint: 'Повторяющееся сообщение будет отправляться автоматически; следующая отправка появится в списке после текущей.',
     scheduleBtn: 'Запланировать',
     refreshGroupsBtn: 'Обновить группы',
-    recentBtn: 'Последние сообщения',
-    recentTitle: 'Последние сообщения в «{group}»',
-    recentSince: 'Собираются с {date}, пока приложение подключено; после перезапуска список начинается заново.',
-    recentEmpty: 'С {date} в этой группе сообщений не было.',
-    recentNotCollecting: 'WhatsApp не подключён, сообщения не собираются.',
-    recentHint: 'Время сервера WhatsApp — с точностью до секунды; «Получено» — когда сообщение дошло до нашего сервера (ваше — когда ушло). Строки идут в порядке поступления.',
-    recentYou: 'Вы',
-    recentUndecrypted: '[не удалось расшифровать]',
-    thServerTime: 'Время сервера',
-    thReceived: 'Получено',
+    dayLabel: 'Сообщения группы за день',
+    dayBtn: 'Показать',
+    dayTitle: '«{group}» — {date}',
+    dayCount: '{n} сообщ. Сохраняются с {since} и хранятся 30 дней.',
+    dayEmpty: 'В этот день сообщений нет. Сообщения сохраняются с {since} и хранятся 30 дней.',
+    dayNothingSaved: 'Сохранённых сообщений пока нет: они сохраняются с момента, как приложение их получает, и хранятся 30 дней.',
+    dayHint: 'Время — как его записал WhatsApp, с точностью до секунды. Сообщения с одной секундой идут в порядке, в котором их принял WhatsApp.',
+    dayYou: 'Вы',
+    dayUndecrypted: '[не удалось расшифровать]',
+    thTime: 'Время',
     thFrom: 'От',
     thText: 'Текст',
+    errInvalidDayDate: 'Выберите дату.',
     scheduledTitle: 'Запланированные сообщения',
     thWhen: 'Когда',
     thGroup: 'Группа',
@@ -108,18 +109,19 @@ const TRANSLATIONS = {
     repeatHint: 'A repeating message sends automatically; the next occurrence appears in the list after the current one goes out.',
     scheduleBtn: 'Schedule',
     refreshGroupsBtn: 'Refresh groups',
-    recentBtn: 'Recent messages',
-    recentTitle: 'Recent messages in “{group}”',
-    recentSince: 'Collected since {date} while the app is connected; the list starts over after a restart.',
-    recentEmpty: 'No messages in this group since {date}.',
-    recentNotCollecting: 'WhatsApp is not connected, so no messages are being collected.',
-    recentHint: 'WhatsApp’s server time is to the second; “Received” is when the message reached our server (yours: when it left). Rows are in arrival order.',
-    recentYou: 'You',
-    recentUndecrypted: '[could not decrypt]',
-    thServerTime: 'Server time',
-    thReceived: 'Received',
+    dayLabel: 'Group messages on a day',
+    dayBtn: 'Show',
+    dayTitle: '“{group}” — {date}',
+    dayCount: '{n} messages. Saved since {since} and kept for 30 days.',
+    dayEmpty: 'No messages on this day. Messages are saved since {since} and kept for 30 days.',
+    dayNothingSaved: 'No messages saved yet: they are saved from the moment the app receives them and kept for 30 days.',
+    dayHint: 'Times are as WhatsApp recorded them, to the second. Messages within the same second are in the order WhatsApp accepted them.',
+    dayYou: 'You',
+    dayUndecrypted: '[could not decrypt]',
+    thTime: 'Time',
     thFrom: 'From',
     thText: 'Text',
+    errInvalidDayDate: 'Please choose a date.',
     scheduledTitle: 'Scheduled messages',
     thWhen: 'When',
     thGroup: 'Group',
@@ -187,6 +189,7 @@ const SERVER_ERROR_KEYS = {
   'Invalid repeat option.': 'errInvalidRepeat',
   'Unknown placeholder. Use {{day}}, {{month}} or {{year}}.': 'errUnknownPlaceholder',
   'Internal error': 'errInternal',
+  'Invalid date.': 'errInvalidDayDate',
 }
 
 let lang = localStorage.getItem('lang') || 'ru'
@@ -277,6 +280,7 @@ function updateTemplatePreview() {
 function setDefaultTime() {
   if (!$('sendAt').value) $('sendAt').value = toInputValue(Date.now() + 10 * 60 * 1000)
   $('sendAt').min = toInputValue(Date.now())
+  if (!$('dayDate').value) $('dayDate').value = todayValue()
 }
 
 function renderGroups() {
@@ -412,35 +416,44 @@ $('form').addEventListener('submit', async (e) => {
   }
 })
 
-// Last messages of the chosen group, with WhatsApp's server time (seconds) and when
-// they reached us (milliseconds), in arrival order.
+// The chosen group's saved messages on the chosen day, with WhatsApp's time.
 const locale = () => (lang === 'ru' ? 'ru-RU' : 'en-US')
-const fmtSeconds = () => new Intl.DateTimeFormat(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone: zone })
-const fmtMillis = () => new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hourCycle: 'h23', timeZone: zone })
+const fmtTime = () => new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone: zone })
+const fmtSince = () => new Intl.DateTimeFormat(locale(), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: zone })
 
-async function showRecent() {
-  const box = $('recentBox')
+// Today's date in the app's zone, as the date input wants it.
+function todayValue() {
+  const p = window.MessageTemplate.zonedParts(Date.now(), zone)
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}`
+}
+
+async function showDay() {
   const sel = $('group')
-  const msg = $('formMsg')
+  const msg = $('dayMsg')
   msg.className = ''; msg.textContent = ''
   if (!sel.value) {
     msg.className = 'error'; msg.textContent = t('errChooseGroup')
     return
   }
+  const date = $('dayDate').value
+  if (!date) {
+    msg.className = 'error'; msg.textContent = t('errInvalidDayDate')
+    return
+  }
   try {
-    const { since, messages } = await api(`/api/groups/${encodeURIComponent(sel.value)}/recent`)
+    const { savedSince, messages } = await api(`/api/groups/${encodeURIComponent(sel.value)}/messages?date=${encodeURIComponent(date)}`)
     const name = sel.selectedOptions[0]?.textContent.replace(/ \(\d+\)$/, '') || sel.value
-    $('recentTitle').textContent = t('recentTitle', { group: name })
-    const sinceText = since ? fmtSeconds().format(since) : null
-    $('recentInfo').textContent = !since ? t('recentNotCollecting')
-      : messages.length ? t('recentSince', { date: sinceText }) : t('recentEmpty', { date: sinceText })
-    $('recentList').innerHTML = messages.map((m) => `<tr${m.fromMe ? ' class="mine"' : ''}>
-        <td class="time">${m.serverTime ? esc(fmtSeconds().format(m.serverTime)) : '—'}</td>
-        <td class="time">${esc(fmtMillis().format(m.receivedAt))}</td>
-        <td>${esc(m.fromMe ? t('recentYou') : (m.sender || '—'))}</td>
-        <td class="msg">${esc(m.undecrypted ? t('recentUndecrypted') : m.text)}</td>
+    const [y, m, d] = date.split('-')
+    $('dayTitle').textContent = t('dayTitle', { group: name, date: `${d}.${m}.${y}` })
+    const since = savedSince ? fmtSince().format(savedSince) : null
+    $('dayInfo').textContent = !since ? t('dayNothingSaved')
+      : messages.length ? t('dayCount', { n: messages.length, since }) : t('dayEmpty', { since })
+    $('dayList').innerHTML = messages.map((x) => `<tr${x.fromMe ? ' class="mine"' : ''}>
+        <td class="time">${x.serverTime ? esc(fmtTime().format(x.serverTime)) : '—'}</td>
+        <td>${esc(x.fromMe ? t('dayYou') : (x.sender || '—'))}</td>
+        <td class="msg">${esc(x.undecrypted ? t('dayUndecrypted') : (x.text ?? ''))}</td>
       </tr>`).join('')
-    box.hidden = false
+    $('dayBox').hidden = false
   } catch (err) {
     msg.className = 'error'; msg.textContent = err.message
   }
@@ -505,8 +518,9 @@ $('groupFilter').addEventListener('input', renderGroups)
 $('message').addEventListener('input', updateTemplatePreview)
 $('sendAt').addEventListener('input', updateTemplatePreview)
 $('refreshGroups').addEventListener('click', () => loadGroups(true))
-$('recentBtn').addEventListener('click', showRecent)
-$('group').addEventListener('change', () => { $('recentBox').hidden = true })
+$('dayBtn').addEventListener('click', showDay)
+$('group').addEventListener('change', () => { $('dayBox').hidden = true })
+$('dayDate').addEventListener('change', () => { $('dayBox').hidden = true })
 $('logout').addEventListener('click', async () => {
   if (!confirm(t('logoutConfirm'))) return
   try { await api('/api/logout', { method: 'POST' }) } catch (err) { alert(err.message) }
@@ -526,6 +540,7 @@ async function loadMe() {
     if (me.timeZone && me.timeZone !== zone) {
       zone = me.timeZone
       $('sendAt').value = ''
+      $('dayDate').value = ''
       setDefaultTime()
       applyTranslations()
     }

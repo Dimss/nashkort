@@ -228,7 +228,7 @@ test('preparing a group send fetches members and devices and opens sessions only
   await client.stop()
 })
 
-// --- recent messages -----------------------------------------------------------
+// --- group messages ------------------------------------------------------------
 
 const groupMsg = (id, over = {}) => ({
   key: { remoteJid: 'g@g.us', id, fromMe: false, participant: '111@lid', participantAlt: '972500000001@s.whatsapp.net' },
@@ -238,52 +238,42 @@ const groupMsg = (id, over = {}) => ({
   ...over,
 })
 
-test('the client keeps the last 10 chat messages per group with server time, arrival time and sender', async () => {
+const collect = (client) => {
+  const seen = []
+  client.on('group-message', (jid, entry) => seen.push({ jid, ...entry }))
+  return seen
+}
+
+test('every group chat message is reported with WhatsApp\'s time and its sender; other content is not', async () => {
   const { client, sock } = await connectedClient(30)
-  const before = Date.now()
+  const seen = collect(client)
   sock.emit('messages.upsert', { type: 'notify', messages: [
     groupMsg('p1', { message: { protocolMessage: { type: 0 } } }), // not a chat message
     groupMsg('dm', { key: { remoteJid: '972500000001@s.whatsapp.net', id: 'dm' } }), // not a group
+    groupMsg('named'),
     groupMsg('nobody', { pushName: undefined }),
     groupMsg('long', { message: { extendedTextMessage: { text: 'x'.repeat(100) } } }),
     groupMsg('img', { message: { imageMessage: { mimetype: 'image/jpeg' } } }),
     groupMsg('enc', { message: null, messageStubType: 2 }),
     groupMsg('join', { message: null, messageStubType: 27 }), // a group event, not a message
+    groupMsg('long-ts', { messageTimestamp: { toString: () => '1793036001' } }), // protobuf Long
   ] })
-  sock.emit('messages.upsert', { type: 'append', messages: [groupMsg('history-like')] })
+  sock.emit('messages.upsert', { type: 'append', messages: [groupMsg('appended')] })
   sock.emit('messages.upsert', { type: 'other', messages: [groupMsg('ignored')] })
-  const { since, messages } = client.recentMessages('g@g.us')
-  assert.ok(since <= before)
-  assert.deepEqual(messages.map((m) => m.id), ['nobody', 'long', 'img', 'enc', 'history-like'])
-  const [nobody, long, img, enc] = messages
-  assert.equal(nobody.sender, '972500000001', 'without a profile name, the number')
-  assert.equal(nobody.serverTime, 1793036000 * 1000)
-  assert.ok(nobody.receivedAt >= before)
-  assert.equal(long.text, `${'x'.repeat(60)}…`)
-  assert.equal(img.text, '[image]')
-  assert.equal(enc.undecrypted, true)
-  assert.deepEqual(client.recentMessages('other@g.us').messages, [])
-
-  sock.emit('messages.upsert', { type: 'notify', messages: Array.from({ length: 12 }, (_, i) => groupMsg(`n${i}`)) })
-  assert.deepEqual(client.recentMessages('g@g.us').messages.map((m) => m.id), ['n2', 'n3', 'n4', 'n5', 'n6', 'n7', 'n8', 'n9', 'n10', 'n11'])
-  await client.stop()
-  assert.deepEqual(client.recentMessages('g@g.us'), { since: null, messages: [] }, 'nothing is kept after the connection stops')
-})
-
-test('a message that failed to decrypt is filled in when it arrives again, keeping its first arrival time', async () => {
-  const { client, sock } = await connectedClient(31)
-  sock.emit('messages.upsert', { type: 'notify', messages: [groupMsg('m', { message: null, messageStubType: 2 })] })
-  const first = client.recentMessages('g@g.us').messages[0].receivedAt
-  await new Promise((r) => setTimeout(r, 5))
-  sock.emit('messages.upsert', { type: 'notify', messages: [groupMsg('m')] })
-  const [m] = client.recentMessages('g@g.us').messages
-  assert.equal(m.text, 'text m')
-  assert.equal(m.undecrypted, false)
-  assert.equal(m.receivedAt, first)
+  assert.deepEqual(seen.map((m) => m.id), ['named', 'nobody', 'long', 'img', 'enc', 'long-ts', 'appended'])
+  const byId = Object.fromEntries(seen.map((m) => [m.id, m]))
+  assert.deepEqual(byId.named, { jid: 'g@g.us', id: 'named', fromMe: false, sender: 'Dana', serverTime: 1793036000 * 1000, text: 'text named', undecrypted: false })
+  assert.equal(byId.nobody.sender, '972500000001', 'without a profile name, the number')
+  assert.equal(byId.long.text, 'x'.repeat(100), 'the whole text')
+  assert.equal(byId.img.text, '[image]')
+  assert.equal(byId.enc.undecrypted, true)
+  assert.equal(byId.enc.text, null)
+  assert.equal(byId['long-ts'].serverTime, 1793036001 * 1000)
+  assert.equal(byId.appended.serverTime, 1793036000 * 1000, 'someone else\'s message keeps its time in an append')
   await client.stop()
 })
 
-test('our own send is listed once, at its socket-write time, with the server time from its ack', async () => {
+test('our own send is reported with its text, then with WhatsApp\'s time from the ack; Baileys\' echo carries no time', async () => {
   const { client, sock } = await connectedClient(32, {
     sendMessage: async (jid, content, options) => {
       // what Baileys does: log right before the socket write, then echo the message as an 'append' upsert
@@ -292,14 +282,17 @@ test('our own send is listed once, at its socket-write time, with the server tim
       sock.emit('messages.upsert', { type: 'append', messages: [{ key: { remoteJid: jid, id: options.messageId, fromMe: true }, messageTimestamp: 1, message: { conversation: content.text } }] })
     },
   })
+  const seen = collect(client)
   const before = Date.now()
   const { messageId, writtenAt, doneAt, ack } = await client.sendText('g@g.us', 'court 3 please')
   assert.ok(writtenAt >= before && doneAt - writtenAt >= 10, 'the write time is taken before Baileys finishes')
   sock.ws.emit('CB:ack,class:message', { attrs: { id: messageId, t: '1793036600' } })
   assert.equal((await ack).serverTime, 1793036600 * 1000)
-  const listed = client.recentMessages('g@g.us').messages
-  assert.equal(listed.length, 1)
-  assert.deepEqual({ ...listed[0] }, { id: messageId, fromMe: true, sender: null, serverTime: 1793036600 * 1000, receivedAt: writtenAt, text: 'court 3 please', undecrypted: false })
+  assert.deepEqual(seen, [
+    { jid: 'g@g.us', id: messageId, fromMe: true, sender: null, serverTime: null, text: 'court 3 please', undecrypted: false },
+    { jid: 'g@g.us', id: messageId, fromMe: true, text: 'court 3 please' },
+    { jid: 'g@g.us', id: messageId, fromMe: true, serverTime: 1793036600 * 1000 },
+  ])
   await client.stop()
 })
 
@@ -317,4 +310,19 @@ test('the logger handed to Baileys works with real pino, including the child log
   assert.doesNotThrow(() => cfg.logger.child({ class: 'ns' }).warn('child works'))
   assert.doesNotThrow(() => cfg.logger.debug({ msgId: 'x' }, 'sending message to 1 devices'))
   await client.stop()
+})
+
+test('a user\'s reported group messages are saved under that user, and a failed save does not throw', async () => {
+  const { saveGroupMessages } = await env.load('clients.js')
+  const { EventEmitter } = await import('node:events')
+  const saved = []
+  const client = new EventEmitter()
+  saveGroupMessages(client, 7, { record: (owner, jid, entry) => saved.push([owner, jid, entry.id]) })
+  client.emit('group-message', 'g@g.us', { id: 'm1' })
+  assert.deepEqual(saved, [[7, 'g@g.us', 'm1']])
+  const errors = []
+  const failing = Object.assign(new EventEmitter(), { logger: { error: (o) => errors.push(o) } })
+  saveGroupMessages(failing, 7, { record: () => { throw new Error('disk full') } })
+  assert.doesNotThrow(() => failing.emit('group-message', 'g@g.us', { id: 'm2' }))
+  assert.equal(errors.length, 1)
 })

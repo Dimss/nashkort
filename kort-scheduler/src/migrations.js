@@ -57,11 +57,32 @@ const SESSIONS_TABLE = `
   )
 `
 
+// Group messages each user's connection saw, for the day view. `server_time` is
+// WhatsApp's time (whole seconds, as ms); `id` is the arrival order, which follows
+// WhatsApp's server order within a second. `recorded_at` is only for retention.
+const GROUP_MESSAGES_TABLE = `
+  CREATE TABLE IF NOT EXISTS group_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_jid TEXT NOT NULL,
+    msg_id TEXT NOT NULL,
+    from_me INTEGER NOT NULL DEFAULT 0,
+    sender TEXT,
+    server_time INTEGER,
+    text TEXT,
+    undecrypted INTEGER NOT NULL DEFAULT 0,
+    recorded_at INTEGER NOT NULL,
+    UNIQUE (owner_id, group_jid, msg_id)
+  )
+`
+
 const INDEXES = `
   CREATE INDEX IF NOT EXISTS idx_sched_status_send_at ON scheduled_messages(status, send_at);
   CREATE INDEX IF NOT EXISTS idx_sched_owner ON scheduled_messages(owner_id, status, send_at);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth0_sub ON users(auth0_sub);
   CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+  CREATE INDEX IF NOT EXISTS idx_group_messages_day ON group_messages(owner_id, group_jid, server_time);
+  CREATE INDEX IF NOT EXISTS idx_group_messages_recorded ON group_messages(recorded_at);
 `
 
 // The one-way cutover from the password-login schema. Runs inside a single
@@ -92,6 +113,7 @@ export function openDatabase(dbPath, { adminEmail, backupPath } = {}) {
   db.exec('PRAGMA journal_mode = WAL')
   db.exec(TABLES)
   db.exec(SESSIONS_TABLE)
+  db.exec(GROUP_MESSAGES_TABLE)
 
   for (const stmt of [
     `ALTER TABLE scheduled_messages ADD COLUMN repeat_rule TEXT NOT NULL DEFAULT 'none'`,

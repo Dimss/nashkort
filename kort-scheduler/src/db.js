@@ -74,6 +74,27 @@ const stmts = {
     ORDER BY CASE state WHEN 'pending' THEN 0 ELSE 1 END, created_at ASC, id ASC
   `),
 
+  // A message seen again (our own send and its ack, or one decrypted on a retry) fills
+  // in what was missing; its arrival order stays that of the first sighting.
+  upsertGroupMessage: db.prepare(`
+    INSERT INTO group_messages (owner_id, group_jid, msg_id, from_me, sender, server_time, text, undecrypted, recorded_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (owner_id, group_jid, msg_id) DO UPDATE SET
+      sender = COALESCE(excluded.sender, sender),
+      server_time = COALESCE(excluded.server_time, server_time),
+      text = COALESCE(excluded.text, text),
+      undecrypted = CASE WHEN excluded.text IS NOT NULL THEN 0 ELSE undecrypted END
+  `),
+  groupMessagesBetween: db.prepare(`
+    SELECT msg_id, from_me, sender, server_time, text, undecrypted FROM group_messages
+    WHERE owner_id = ? AND group_jid = ? AND COALESCE(server_time, recorded_at) >= ? AND COALESCE(server_time, recorded_at) < ?
+    ORDER BY COALESCE(server_time, recorded_at), id
+    LIMIT ?
+  `),
+  groupMessagesSince: db.prepare(`SELECT MIN(recorded_at) AS at FROM group_messages WHERE owner_id = ?`),
+  pruneGroupMessages: db.prepare(`DELETE FROM group_messages WHERE COALESCE(server_time, recorded_at) < ?`),
+  deleteGroupMessagesForOwner: db.prepare(`DELETE FROM group_messages WHERE owner_id = ?`),
+
   insertSession: db.prepare(`INSERT INTO sessions (token_hash, user_id, sid, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`),
   getSession: db.prepare(`
     SELECT s.token_hash, s.sid, s.expires_at, u.id AS user_id, u.email, u.state
@@ -184,6 +205,40 @@ export const users = {
   },
   list() {
     return stmts.listUsers.all()
+  },
+}
+
+export const GROUP_MESSAGE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+const MAX_TEXT = 4096
+const flag = (v) => (v ? 1 : 0)
+
+export const groupMessages = {
+  // `entry` fields left null are unknown and keep what is stored.
+  record(ownerId, groupJid, { id, fromMe = false, sender = null, serverTime = null, text = null, undecrypted = false }, now = Date.now()) {
+    requireOwner(ownerId)
+    if (typeof id !== 'string' || !id) return
+    const body = typeof text === 'string' ? text.slice(0, MAX_TEXT) : null
+    stmts.upsertGroupMessage.run(ownerId, groupJid, id, flag(fromMe), sender, serverTime, body, flag(undecrypted), now)
+  },
+  between(ownerId, groupJid, from, to, limit = 5000) {
+    return stmts.groupMessagesBetween.all(requireOwner(ownerId), groupJid, from, to, limit).map((r) => ({
+      id: r.msg_id,
+      fromMe: r.from_me === 1,
+      sender: r.sender,
+      serverTime: r.server_time,
+      text: r.text,
+      undecrypted: r.undecrypted === 1,
+    }))
+  },
+  // When the earliest kept message of this owner was saved, or null.
+  savedSince(ownerId) {
+    return stmts.groupMessagesSince.get(requireOwner(ownerId)).at ?? null
+  },
+  prune(now = Date.now()) {
+    return stmts.pruneGroupMessages.run(now - GROUP_MESSAGE_RETENTION_MS).changes
+  },
+  deleteForOwner(ownerId) {
+    return stmts.deleteGroupMessagesForOwner.run(requireOwner(ownerId)).changes
   },
 }
 

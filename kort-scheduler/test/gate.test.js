@@ -241,32 +241,35 @@ test('AE5 (R16, R17): over HTTP a user cannot read, cancel or delete another use
   assert.equal((await bad({ groupJid: 'g@g.us', message: 'hi', sendAt: future(), repeat: 'hourly' })).status, 400)
 })
 
-test('recent messages: each user gets only their own connection\'s list, a bad group id is refused, and no connection gives an empty list', async () => {
-  const { clients } = await env.load('clients.js')
-  const a = await signIn(srv.origin, issuer, verified('auth0|recent-a', 'recent-a@example.com'))
-  const b = await signIn(srv.origin, issuer, verified('auth0|recent-b', 'recent-b@example.com'))
-  const c = await signIn(srv.origin, issuer, verified('auth0|recent-c', 'recent-c@example.com'))
-  const ids = ['a', 'b', 'c'].map((x) => users.findBySub(`auth0|recent-${x}`).id)
-  for (const id of ids) users.setState(id, 'approved')
-  const asked = []
-  const fake = (label) => ({ recentMessages: (jid) => { asked.push([label, jid]); return { since: 1, messages: [{ id: label, text: `${label} text` }] } } })
-  const byId = new Map([[ids[0], fake('a')], [ids[1], fake('b')]])
-  const realGet = clients.get
-  clients.get = (id) => byId.get(id)
-  try {
-    const ra = await request(srv.origin, `/api/groups/${encodeURIComponent('g@g.us')}/recent`, asUser(a.session))
-    assert.equal(ra.status, 200)
-    assert.deepEqual(ra.json(), { since: 1, messages: [{ id: 'a', text: 'a text' }] })
-    const rb = await request(srv.origin, `/api/groups/${encodeURIComponent('g@g.us')}/recent`, asUser(b.session))
-    assert.deepEqual(rb.json().messages.map((m) => m.id), ['b'])
-    assert.deepEqual(asked, [['a', 'g@g.us'], ['b', 'g@g.us']])
-    const bad = await request(srv.origin, `/api/groups/${encodeURIComponent('972500000001@s.whatsapp.net')}/recent`, asUser(a.session))
-    assert.equal(bad.status, 400)
-    const none = await request(srv.origin, `/api/groups/${encodeURIComponent('g@g.us')}/recent`, asUser(c.session))
-    assert.deepEqual(none.json(), { since: null, messages: [] })
-    const anon = await request(srv.origin, `/api/groups/${encodeURIComponent('g@g.us')}/recent`)
-    assert.equal(anon.status, 401)
-  } finally {
-    clients.get = realGet
-  }
+test('day view: each user gets only their own saved messages of that group and day, in order; bad input is refused', async () => {
+  const { groupMessages } = await env.load('db.js')
+  const { zonedTime } = await import('../public/template.js')
+  const zone = 'Asia/Jerusalem'
+  const at = (day, hour, minute, second = 0) => zonedTime({ year: 2026, month: 10, day, hour, minute, second }, zone)
+  const a = await signIn(srv.origin, issuer, verified('auth0|day-a', 'day-a@example.com'))
+  const b = await signIn(srv.origin, issuer, verified('auth0|day-b', 'day-b@example.com'))
+  const [ida, idb] = ['a', 'b'].map((x) => users.findBySub(`auth0|day-${x}`).id)
+  for (const id of [ida, idb]) users.setState(id, 'approved')
+  const rec = (owner, jid, id, serverTime, extra = {}) => groupMessages.record(owner, jid, { id, sender: 'Dana', serverTime, text: id, ...extra })
+  rec(ida, 'g@g.us', 'late-evening-before', at(25, 23, 59, 59))
+  rec(ida, 'g@g.us', 'second-at-8', at(26, 8, 0, 0))   // arrived first...
+  rec(ida, 'g@g.us', 'first-at-8', at(26, 8, 0, 0))    // ...so it is listed before this one
+  rec(ida, 'g@g.us', 'midnight', at(26, 0, 0, 0))
+  rec(ida, 'g@g.us', 'last-second', at(26, 23, 59, 59))
+  rec(ida, 'g@g.us', 'next-day', at(27, 0, 0, 0))
+  rec(ida, 'other@g.us', 'other-group', at(26, 9, 0, 0))
+  rec(idb, 'g@g.us', 'b-only', at(26, 9, 0, 0))
+  const day = (s, date, jid = 'g@g.us') => request(srv.origin, `/api/groups/${encodeURIComponent(jid)}/messages?date=${date}`, asUser(s))
+
+  const ra = await day(a.session, '2026-10-26')
+  assert.equal(ra.status, 200)
+  assert.deepEqual(ra.json().messages.map((m) => m.id), ['midnight', 'second-at-8', 'first-at-8', 'last-second'])
+  assert.deepEqual(ra.json().messages[0], { id: 'midnight', fromMe: false, sender: 'Dana', serverTime: at(26, 0, 0, 0), text: 'midnight', undecrypted: false })
+  assert.ok(ra.json().savedSince > 0)
+  assert.deepEqual((await day(b.session, '2026-10-26')).json().messages.map((m) => m.id), ['b-only'])
+  assert.deepEqual((await day(a.session, '2026-10-24')).json().messages, [])
+
+  for (const bad of ['2026-13-01', '2026-02-30', '26-10-2026', '']) assert.equal((await day(a.session, bad)).status, 400, `date ${bad || '(none)'}`)
+  assert.equal((await day(a.session, '2026-10-26', '972500000001@s.whatsapp.net')).status, 400)
+  assert.equal((await request(srv.origin, `/api/groups/${encodeURIComponent('g@g.us')}/messages?date=2026-10-26`)).status, 401)
 })

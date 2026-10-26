@@ -3,13 +3,13 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { config, normalizeEmail } from './config.js'
-import { messages, sessions, users, transaction } from './db.js'
+import { messages, sessions, users, transaction, groupMessages } from './db.js'
 import { REPEAT_RULES, upcomingSends } from './recurrence.js'
 import { clients } from './clients.js'
 import { createOidc, EMAIL_NOT_VERIFIED, SUBJECT_PREFIXES, CALLBACK_PATH } from './oidc.js'
 import { accounts as defaultAccounts } from './accounts.js'
 import { versionAssetLinks } from './assets.js'
-import { renderTemplate, unknownPlaceholders } from '../public/template.js'
+import { renderTemplate, unknownPlaceholders, zonedTime } from '../public/template.js'
 import {
   getCookie, readSession, createSession, setSessionCookie, clearSessionCookie, destroySession,
   setSignInCookie, readSignInCookie, clearSignInCookie,
@@ -315,14 +315,23 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     }
   })
 
-  // The last messages the caller's connection saw in one group (kept in memory only).
-  app.get('/api/groups/:jid/recent', (req, res) => {
+  // The caller's saved messages of one group on one day (00:00 to 23:59 in the app's
+  // time zone), in arrival order, with WhatsApp's own time.
+  app.get('/api/groups/:jid/messages', (req, res) => {
     const jid = req.params.jid
     if (typeof jid !== 'string' || jid.length > 128 || !jid.endsWith('@g.us')) {
       return res.status(400).json({ error: 'Please choose a group.' })
     }
-    const client = clients.get(req.user.user_id)
-    res.json(client ? client.recentMessages(jid) : { since: null, messages: [] })
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(req.query.date ?? ''))
+    const [year, month, day] = m ? m.slice(1).map(Number) : []
+    if (!m || month < 1 || month > 12 || day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()) {
+      return res.status(400).json({ error: 'Invalid date.' })
+    }
+    const zone = config.timeZone
+    const from = zonedTime({ year, month, day, hour: 0, minute: 0 }, zone)
+    const to = zonedTime({ year, month, day: day + 1, hour: 0, minute: 0 }, zone)
+    const owner = req.user.user_id
+    res.json({ savedSince: groupMessages.savedSince(owner), messages: groupMessages.between(owner, jid, from, to) })
   })
 
   app.get('/api/messages', (req, res) => {
@@ -400,6 +409,8 @@ export function createApp({ fetch: fetchImpl, oidc, accounts = defaultAccounts }
     try {
       const client = clients.ensure(req.user.user_id)
       await client.logout()
+      // Unlinking the phone also forgets the messages its connection saved.
+      groupMessages.deleteForOwner(req.user.user_id)
       res.json({ ok: true })
     } catch (err) {
       next(err)

@@ -93,7 +93,7 @@ database connection or Google.
 
 - Messages are stored in SQLite (`data/scheduler.db`) and survive restarts.
 - A message goes out at its exact send time, to the millisecond on the server's clock. A minute before, the app fetches what the send needs from WhatsApp (group members, their devices, encryption sessions), so at the send time only local encryption and one write remain. Messages for different groups due at the same time go out together. The log line for each send shows, in milliseconds after the send time, when it was written to the socket, when Baileys finished (it saves keys after the write) and when WhatsApp's server acknowledged it. Accuracy depends on the server clock, so keep it synced (`timedatectl` should show `System clock synchronized: yes`).
-- **Recent messages** under the form shows the last 10 messages of the chosen group: WhatsApp's server time (whole seconds), when the message reached the server running the app (milliseconds; for your own scheduled sends, when they left), the sender and the first 60 characters, in arrival order. Only messages seen since the connection started are listed, and they are kept in memory only, so the list starts empty after a restart.
+- **Group messages on a day** under the form lists the chosen group's messages on the chosen date (00:00 to 23:59), with the time WhatsApp recorded (to the second), the sender and the text. Messages within the same second are in the order WhatsApp accepted them. Every group message a user's connection receives is saved in the database (`group_messages`), so only days from when the app received them are covered; WhatsApp history from before is not fetched. Saved messages are deleted after 30 days, and **Log out of WhatsApp** deletes all of that user's at once. Like everything else, each user sees only their own.
 - If a user's phone is disconnected when a message is due, it stays pending and goes out as soon as the connection is back.
 - A send that WhatsApp rejects is not retried: it is marked **failed** with the error at once. A repeating message still gets its next occurrence. (A disconnected phone is not a failure; see above.)
 - Pending messages can be cancelled; sent, failed, missed or cancelled ones can be deleted.
@@ -114,7 +114,7 @@ must come from the app's own origin.
 | GET | `/api/me` | `{ email, state, isAdmin }` for any signed-in account |
 | GET | `/api/status` | The caller's connection status and QR code (data URL) when a scan is needed |
 | GET | `/api/groups?refresh=1` | Groups the caller's phone is in |
-| GET | `/api/groups/:jid/recent` | `{ since, messages }`: the last 10 messages the caller's connection saw in that group |
+| GET | `/api/groups/:jid/messages?date=YYYY-MM-DD` | `{ savedSince, messages }`: the caller's saved messages of that group on that day (00:00 to 23:59 in `TIME_ZONE`), in arrival order |
 | GET | `/api/messages` | The caller's scheduled messages |
 | POST | `/api/messages` | `{ groupJid, groupName, message, sendAt, repeat }` (`sendAt` epoch ms, `repeat` `none`\|`weekly`\|`monthly`) |
 | POST | `/api/messages/:id/cancel` | Cancel one of the caller's pending messages |
@@ -251,4 +251,4 @@ Record the VM's own figures here after cutover.
 - Baileys is an unofficial client. Keep the process running so scheduled messages go out,
   and avoid bulk messaging, which can get a number banned.
 - `data/` holds every user's WhatsApp credentials, which are equivalent to their logged-in
-  phone session. Keep it at mode 0700 and out of any sync or backup that leaves the VM unencrypted.
+  phone session, and the last 30 days of their groups' messages. Keep it at mode 0700 and out of any sync or backup that leaves the VM unencrypted.
