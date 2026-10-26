@@ -1,0 +1,44 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+WhatsApp group message scheduler: Express 5 + `node:sqlite` + Baileys (unofficial WhatsApp Web client), Auth0 sign-in, one linked phone per user. Plain ES modules, no build step, no linter, no TypeScript. Node 24+. The README is the source of truth for env vars, the Auth0 tenant checklist, the API table and the deploy runbook.
+
+## Commands
+
+```bash
+npm install
+set -a; . ./.env; set +a; npm start      # needs .env from .env.example; serves http://localhost:3000 (127.0.0.1 only)
+npm run dev                              # same with --watch
+npm test                                 # all tests, Node's built-in runner; no network, no Auth0
+node --no-warnings=ExperimentalWarning --test test/scheduler.test.js                         # one file
+node --no-warnings=ExperimentalWarning --test --test-name-pattern='monthly' test/recurrence.test.js  # by test name
+# Use the name filter on one file only: admin/gate/oidc/pages tests start an HTTP server and hang when the filter matches none of their tests.
+./deploy/redeploy.sh                     # rsync to the Oracle VM and restart (DRY_RUN=1 to preview)
+```
+
+Production is an Oracle VM with systemd units in `deploy/`, behind a Cloudflare Tunnel. `Dockerfile` and `fly.toml` are stale and predate Auth0. Ignore them.
+
+## Architecture
+
+**Start-up order matters** (`src/index.js`): it validates the env first, then dynamically imports the rest. `config.js` creates `DATA_DIR` on import, and `db.js` opens and migrates the database on import, which can need `ADMIN_EMAIL`. Then `bootstrap()` makes sure the admin row exists and is approved, and moves legacy creds from `data/auth` to `data/wa/<admin id>`. After that the HTTP server starts, WhatsApp clients start (staggered) for approved users with saved creds, and the scheduler starts.
+
+**Modules are singletons with factories.** Each core module exports a ready-made instance (`clients`, `scheduler`, `accounts`, `messages`/`users`/`sessions` from `db.js`). It also exports a factory (`createRegistry`, `createScheduler`, `createAccounts`, `createApp({ fetch, oidc, accounts })`) so tests can inject fakes. Tests use `test/helpers/tempdata.js` `freshData()`: it sets `DATA_DIR` to a temp dir and then `load('db.js')` etc. *dynamically*, because the DB opens at import time. Static imports of `src/db.js` (or anything that imports it) in a test would hit the wrong data dir. `test/helpers/fake-issuer.js` is an in-process OIDC provider passed in as `fetch`, so auth tests never touch the network.
+
+**Data model** (`src/migrations.js`, `src/db.js`): all SQL is prepared statements in `db.js`. `scheduled_messages.status` is `pending | sending | sent | failed | cancelled | missed`. At start-up, rows left in `sending` go back to `pending`. A recurring series is a chain of rows sharing `series_id` (the first row's id). Only one row per series is ever pending; the next one is inserted after the current one finishes. Each row stores the `time_zone` it was scheduled in; rows with null fall back to `TIME_ZONE`. Schema changes are either idempotent `ALTER TABLE ... ADD COLUMN` in `openDatabase` (duplicate-column errors are swallowed) or gated by `PRAGMA user_version` (`SCHEMA_VERSION`). `runInTransaction` is synchronous on purpose: never `await` inside it, because all requests share one connection.
+
+**Scheduler** (`src/scheduler.js`): goal is sends that land as close to the exact `send_at` as possible. `plan()` gives every pending row within `prepareLeadMs` (60 s) its own `setTimeout`, which wakes `SPIN_MS` early and busy-waits the last milliseconds. It also calls `client.prepareGroupSend(jid)` once per group, which does the send's network round trips ahead of time (group metadata, USync device lists, Signal sessions for devices lacking our sender key), so at `send_at` only local encryption and the socket write remain. Preparation is retried on each plan until the owner is connected. A wake timer re-runs `plan()` when the next row enters the window, as do the `messages.events` `'created'` event and the end of every tick. `tick()` (5 s poll, start-up, and the registry's `'connected'` event) handles overdue rows that no timer is waiting for: in parallel across groups, in order within a group. Double sends are impossible because `messages.claim` is an atomic `pending → sending` update. A disconnected phone is not a failure: the row stays pending. A send that throws is marked `failed` at once (`maxAttempts: 1`), and a repeating series still moves to its next occurrence. Only rows of `approved` owners are due or claimable. `sweepMissed` runs when an account is re-enabled: overdue rows become `missed` and series fast-forward past now. `client.sendText` returns `{ messageId, ack }`: it sends with its own message id and `linkPreview: null` (no URL fetch before the send), and `ack` resolves when the server's ack node for that id arrives. The scheduler logs the write and ack latency per send.
+
+**Time and templates** (`public/template.js`): one module shared by the server and the browser. It holds wall-clock conversion in an IANA zone (`zonedParts`/`zonedTime`) and `{{day}}/{{month}}/{{year}}` rendering, where the dates show *send date + 7 days* (`TEMPLATE_DAYS_AHEAD`). `src/recurrence.js` builds on it. Weekly means +7 wall-clock days, so the time of day survives DST. Monthly keeps the series anchor's day-of-month, clamped to the month's last day, and counts from the anchor rather than the previous occurrence so dates don't drift. Changing date logic affects both the UI preview and what actually gets sent.
+
+**WhatsApp** (`src/whatsapp.js`, `src/clients.js`): `WhatsAppClient` wraps one Baileys socket per user. Creds live in `data/wa/<userId>/creds.json`. It auto-reconnects, and a remote logout wipes the creds and shows a fresh QR. A `#generation` counter discards stale async starts. The registry keys clients by integer user id, starts one lazily on `ensure()` (when the page polls `/api/status`), and stops clients that are still unlinked and waiting for a scan after 5 min without polling.
+
+**Auth and accounts** (`src/oidc.js`, `src/session.js`, `src/server.js`, `src/accounts.js`): Auth0 code flow with PKCE via `openid-client`. Discovery is lazy, so start-up never contacts the tenant. Only `auth0|` and `google-oauth2|` subjects with verified emails are accepted. Sessions are random tokens stored hashed in SQLite (30-day absolute lifetime). Cookies are `__Host-` and Secure when `BASE_URL` is https. Account states are `pending → approved ⇄ disabled`, plus `pending → disabled` on reject. The admin is the user whose email equals `ADMIN_EMAIL`. Admin actions refuse the caller's own account; their state changes run in a transaction first, and only then does the WhatsApp client stop or start. Every `/api` query is scoped by `owner_id = req.user.user_id`, so no user, the admin included, can see another's messages. Non-GET requests must pass the same-origin check (`Origin` equals `BASE_URL`, or `Sec-Fetch-Site` same-origin). There is a strict CSP, so no inline scripts in `public/`.
+
+**Frontend** (`public/`): static vanilla JS pages, Russian by default with English (`i18n.js` for the small pages; `app.js` has its own copy). Served with `Cache-Control: no-cache`.
+
+## Conventions
+
+- Commit subjects are prefixed `kort-scheduler:` and describe the user-visible behaviour.
+- When behaviour changes, update the README sections it touches (Behaviour, API, Configuration).
+- `data/` holds every user's WhatsApp session credentials. Never commit it, print its contents or copy it anywhere.
